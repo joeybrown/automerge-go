@@ -1,19 +1,17 @@
 package automerge
-package automerge_test
 
 import (
 	"fmt"
 	"sync"
 	"testing"
 
-	"github.com/automerge/automerge-go"
 	"github.com/stretchr/testify/require"
 )
 
 // TestConcurrent_MapReadWrite tests that concurrent reads and writes to a
 // single Doc are safe (the Doc mutex serializes access to the WASM instance).
 func TestConcurrent_MapReadWrite(t *testing.T) {
-	doc := automerge.New()
+	doc := New()
 
 	const writers = 10
 	const iterations = 50
@@ -45,8 +43,8 @@ func TestConcurrent_MapReadWrite(t *testing.T) {
 
 // TestConcurrent_ListAppend tests concurrent appends to a list.
 func TestConcurrent_ListAppend(t *testing.T) {
-	doc := automerge.New()
-	l := automerge.NewList()
+	doc := New()
+	l := NewList()
 	require.NoError(t, doc.RootMap().Set("list", l))
 
 	const writers = 10
@@ -74,8 +72,8 @@ func TestConcurrent_ListAppend(t *testing.T) {
 
 // TestConcurrent_TextSplice tests concurrent text edits.
 func TestConcurrent_TextSplice(t *testing.T) {
-	doc := automerge.New()
-	txt := automerge.NewText("")
+	doc := New()
+	txt := NewText("")
 	require.NoError(t, doc.RootMap().Set("text", txt))
 
 	const writers = 5
@@ -99,8 +97,8 @@ func TestConcurrent_TextSplice(t *testing.T) {
 
 // TestConcurrent_ReadWhileWriting tests that readers don't see partial state.
 func TestConcurrent_ReadWhileWriting(t *testing.T) {
-	doc := automerge.New()
-	require.NoError(t, doc.RootMap().Set("counter", automerge.NewCounter(0)))
+	doc := New()
+	require.NoError(t, doc.RootMap().Set("counter", NewCounter(0)))
 
 	const readers = 5
 	const writers = 5
@@ -146,7 +144,7 @@ func TestConcurrent_ReadWhileWriting(t *testing.T) {
 
 // TestConcurrent_SaveLoad tests concurrent Save calls.
 func TestConcurrent_SaveLoad(t *testing.T) {
-	doc := automerge.New()
+	doc := New()
 	require.NoError(t, doc.RootMap().Set("x", "hello"))
 
 	const goroutines = 10
@@ -158,12 +156,12 @@ func TestConcurrent_SaveLoad(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			b := doc.Save()
-			d2, err := automerge.Load(b)
+			d2, err := Load(b)
 			if err != nil {
 				t.Errorf("Load failed: %v", err)
 				return
 			}
-			v, err := automerge.As[string](d2.RootMap().Get("x"))
+			v, err := As[string](d2.RootMap().Get("x"))
 			if err != nil {
 				t.Errorf("As failed: %v", err)
 				return
@@ -182,9 +180,9 @@ func TestConcurrent_SaveLoad(t *testing.T) {
 func TestConcurrent_MultiDocMerge(t *testing.T) {
 	const numDocs = 10
 
-	docs := make([]*automerge.Doc, numDocs)
+	docs := make([]*Doc, numDocs)
 	for i := 0; i < numDocs; i++ {
-		docs[i] = automerge.New()
+		docs[i] = New()
 		require.NoError(t, docs[i].RootMap().Set(fmt.Sprintf("doc%d", i), i))
 		_, err := docs[i].Commit(fmt.Sprintf("doc %d initial", i))
 		require.NoError(t, err)
@@ -211,8 +209,8 @@ func TestConcurrent_MultiDocMerge(t *testing.T) {
 
 // TestConcurrent_SyncProtocol tests sync state operations under concurrency.
 func TestConcurrent_SyncProtocol(t *testing.T) {
-	doc1 := automerge.New()
-	doc2 := automerge.New()
+	doc1 := New()
+	doc2 := New()
 
 	require.NoError(t, doc1.RootMap().Set("a", "from doc1"))
 	_, err := doc1.Commit("doc1 change")
@@ -222,8 +220,8 @@ func TestConcurrent_SyncProtocol(t *testing.T) {
 	_, err = doc2.Commit("doc2 change")
 	require.NoError(t, err)
 
-	s1 := automerge.NewSyncState(doc1)
-	s2 := automerge.NewSyncState(doc2)
+	s1 := NewSyncState(doc1)
+	s2 := NewSyncState(doc2)
 
 	// Sync in a loop
 	for i := 0; i < 10; i++ {
@@ -242,9 +240,9 @@ func TestConcurrent_SyncProtocol(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	v1, err := automerge.As[map[string]string](doc1.Root())
+	v1, err := As[map[string]string](doc1.Root())
 	require.NoError(t, err)
-	v2, err := automerge.As[map[string]string](doc2.Root())
+	v2, err := As[map[string]string](doc2.Root())
 	require.NoError(t, err)
 	require.Equal(t, v1, v2)
 	require.Equal(t, map[string]string{"a": "from doc1", "b": "from doc2"}, v1)
