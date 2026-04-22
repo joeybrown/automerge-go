@@ -1,7 +1,7 @@
 //! Commit, empty change, and incremental save/load exports.
 
 use automerge::transaction::CommitOptions;
-use crate::state::{with_doc_mut, set_return_buf, return_buf_len, copy_return_buf};
+use crate::state::{with_doc_mut, set_return_buf, return_buf_len, copy_return_buf, set_last_error, clear_last_error};
 
 /// Build CommitOptions from message + timestamp parameters.
 fn build_commit_options(msg: Option<&str>, timestamp_millis: i64) -> CommitOptions {
@@ -34,10 +34,14 @@ pub extern "C" fn am_commit(
     } else {
         match unsafe { std::str::from_utf8(std::slice::from_raw_parts(msg_ptr, msg_len)) } {
             Ok(s) => Some(s.to_string()),
-            Err(_) => return -1,
+            Err(_) => {
+                set_last_error("invalid UTF-8 in commit message".to_string());
+                return -1;
+            }
         }
     };
 
+    clear_last_error();
     match with_doc_mut(|doc| {
         let opts = build_commit_options(msg.as_deref(), timestamp_millis);
         match doc.commit_with(opts) {

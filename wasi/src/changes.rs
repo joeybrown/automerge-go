@@ -1,5 +1,6 @@
 //! Change introspection and serialization exports.
 
+use automerge::Change;
 use crate::state::{with_doc_mut, set_return_buf, return_buf_len, copy_return_buf};
 
 /// Get the number of current heads (DAG tips).
@@ -146,6 +147,72 @@ pub extern "C" fn am_get_change_by_hash_len(hash_ptr: *const u8) -> u32 {
 #[no_mangle]
 pub extern "C" fn am_get_change_by_hash(hash_ptr: *const u8, ptr_out: *mut u8) -> i32 {
     let _ = hash_ptr;
+    if ptr_out.is_null() {
+        return -1;
+    }
+    copy_return_buf(ptr_out);
+    0
+}
+
+/// Extract all metadata from raw change bytes into a packed info buffer.
+///
+/// Format of output:
+///   [32 bytes: hash]
+///   [8 bytes: timestamp LE i64]
+///   [8 bytes: seq LE u64]
+///   [4 bytes: actor_hex_len LE u32]
+///   [actor_hex_len bytes: actor hex string]
+///   [4 bytes: message_len LE u32]
+///   [message_len bytes: message UTF-8]
+///   [4 bytes: deps_count LE u32]
+///   [deps_count * 32 bytes: dependency hashes]
+///
+/// Returns total byte length stored in return buffer, or 0 on error.
+#[no_mangle]
+pub extern "C" fn am_change_info_len(raw_ptr: *const u8, raw_len: usize) -> u32 {
+    if raw_ptr.is_null() || raw_len == 0 {
+        return 0;
+    }
+    let raw = unsafe { std::slice::from_raw_parts(raw_ptr, raw_len) };
+    let change = match Change::from_bytes(raw.to_vec()) {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+
+    let hash = change.hash();
+    let timestamp = change.timestamp();
+    let seq = change.seq();
+    let actor_hex = change.actor_id().to_hex_string();
+    let message = change.message().map_or("", |v| v);
+    let deps = change.deps();
+
+    let mut buf = Vec::new();
+    // hash (32 bytes)
+    buf.extend_from_slice(&hash.0);
+    // timestamp (8 bytes LE i64)
+    buf.extend_from_slice(&timestamp.to_le_bytes());
+    // seq (8 bytes LE u64)
+    buf.extend_from_slice(&seq.to_le_bytes());
+    // actor hex string (4-byte len + data)
+    buf.extend_from_slice(&(actor_hex.len() as u32).to_le_bytes());
+    buf.extend_from_slice(actor_hex.as_bytes());
+    // message (4-byte len + data)
+    buf.extend_from_slice(&(message.len() as u32).to_le_bytes());
+    buf.extend_from_slice(message.as_bytes());
+    // deps (4-byte count + 32 bytes each)
+    buf.extend_from_slice(&(deps.len() as u32).to_le_bytes());
+    for dep in deps {
+        buf.extend_from_slice(&dep.0);
+    }
+
+    set_return_buf(buf);
+    return_buf_len() as u32
+}
+
+/// Copy the change info into a pre-allocated buffer.
+#[no_mangle]
+pub extern "C" fn am_change_info(raw_ptr: *const u8, raw_len: usize, ptr_out: *mut u8) -> i32 {
+    let _ = (raw_ptr, raw_len); // data already in return_buf from _len call
     if ptr_out.is_null() {
         return -1;
     }

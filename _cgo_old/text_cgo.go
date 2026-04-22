@@ -1,21 +1,44 @@
 package automerge
 
-import (
-	"context"
-	"fmt"
-)
+// #include "automerge.h"
+import "C"
+import "fmt"
 
 // Text is a mutable unicode string that can be edited collaboratively.
 //
 // Note that automerge considers text to be a sequence of unicode codepoints
 // while most go code treats strings as a sequence of bytes (that are hopefully valid utf8).
+// In go programs unicode codepoints are stored as integers of type [rune], and the [unicode/utf8] package
+// provides some helpers for common operations.
+//
 // When editing Text you must pass positions and counts in terms of codepoints not bytes.
+// For example if you wanted to replace the first instance of "🙃" you could do something like this:
+//
+//	s, _ := text.Get() => "😀🙃"
+//	byteIndex := strings.Index(s, "🙃") => 4
+//	runeIndex := utf8.RuneCountInString(s[:byteIndex]) => 1
+//	text.Splice(runeIndex, 1, "🧟") => "🙃🧟"
+//
+// Although it is possible to represent invalid utf8 in a go string, automerge will error if you
+// try to write invalid utf8 into a document.
+//
+// If you are new to unicode it's worth pointing out that the number of codepoints does not
+// necessarily correspond to the number of rendered glyphs (for example Text("👍🏼").Len() == 2).
+// For more information consult the Unicode Consortium's [FAQ].
+//
+// [FAQ]: https://www.unicode.org/faq/char_combmark.html
+// [rune]: https://pkg.go.dev/builtin#rune
 type Text struct {
-	doc    *Doc
-	handle objHandle
-	path   *Path
+	doc   *Doc
+	objID *objID
+	path  *Path
 
 	val string
+}
+
+func (t *Text) lock() (*C.AMdoc, *C.AMobjId, func()) {
+	cDoc, unlock := t.doc.lock()
+	return cDoc, t.objID.cObjID, unlock
 }
 
 // NewText returns a detached Text with the given starting value.
@@ -26,6 +49,7 @@ func NewText(s string) *Text {
 
 // Len returns number of unicode codepoints in the text, this
 // may be less than the number of utf-8 bytes.
+// For example Text("😀😀").Len() == 2, while len("😀😀") == 8.
 func (t *Text) Len() int {
 	if t.doc == nil {
 		return 0
@@ -38,15 +62,9 @@ func (t *Text) Len() int {
 		return v.Text().Len()
 	}
 
-	b, unlock := t.doc.lock()
+	cDoc, cObj, unlock := t.lock()
 	defer unlock()
-
-	ctx := context.Background()
-	size, err := b.objSize(ctx, t.handle)
-	if err != nil {
-		return 0
-	}
-	return int(size)
+	return int(C.AMobjSize(cDoc, cObj, nil))
 }
 
 // Get returns the current value as a string
@@ -69,45 +87,45 @@ func (t *Text) Get() (string, error) {
 		}
 	}
 
-	b, unlock := t.doc.lock()
+	cDoc, cObj, unlock := t.lock()
 	defer unlock()
 
-	ctx := context.Background()
-	return b.textGet(ctx, t.handle)
+	s, err := wrap(C.AMtext(cDoc, cObj, nil)).item()
+	if err != nil {
+		return "", err
+	}
+	return s.str(), nil
 }
 
 // Set overwrites the entire string with a new value,
 // prefer to use Insert/Delete/Append/Splice as appropriate
 // to preserves collaborators changes.
 func (t *Text) Set(s string) error {
-	// Delete all existing content and insert new
-	length := t.Len()
-	return t.splice(0, length, s)
+	return t.splice(0, C.PTRDIFF_MAX, s)
 }
 
 // Insert adds a substr at position pos in the Text
 func (t *Text) Insert(pos int, s string) error {
-	return t.splice(uint(pos), 0, s)
+	return t.splice(C.size_t(pos), 0, s)
 }
 
 // Delete deletes del runes from position pos
 func (t *Text) Delete(pos int, del int) error {
-	return t.splice(uint(pos), del, "")
+	return t.splice(C.size_t(pos), C.ptrdiff_t(del), "")
 }
 
 // Append adds substr s at the end of the string
 func (t *Text) Append(s string) error {
-	length := t.Len()
-	return t.splice(uint(length), 0, s)
+	return t.splice(C.SIZE_MAX, 0, s)
 }
 
 // Splice deletes del runes at position pos, and inserts
 // substr s in their place.
 func (t *Text) Splice(pos int, del int, s string) error {
-	return t.splice(uint(pos), del, s)
+	return t.splice(C.size_t(pos), C.ptrdiff_t(del), s)
 }
 
-func (t *Text) splice(pos uint, del int, s string) error {
+func (t *Text) splice(pos C.size_t, del C.ptrdiff_t, s string) error {
 	if t.doc == nil {
 		return fmt.Errorf("automerge.Text: tried to write to detached text")
 	}
@@ -116,16 +134,16 @@ func (t *Text) splice(pos uint, del int, s string) error {
 		if err != nil {
 			return err
 		}
-		t.doc = t2.doc
-		t.handle = t2.handle
+		t.objID = t2.objID
 		t.path = nil
 	}
 
-	b, unlock := t.doc.lock()
+	cStr, free := toByteSpanStr(s)
+	defer free()
+	cDoc, cObj, unlock := t.lock()
 	defer unlock()
 
-	ctx := context.Background()
-	err := b.textSplice(ctx, t.handle, pos, del, s)
+	err := wrap(C.AMspliceText(cDoc, cObj, pos, del, cStr)).void()
 	if err != nil {
 		return fmt.Errorf("automerge.Text: failed to write: %w", err)
 	}

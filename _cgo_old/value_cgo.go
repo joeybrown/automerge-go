@@ -12,46 +12,57 @@ import (
 // or a void to indicate that no value existed at all.
 // You can convert from a Value to a go type using [As], or call accessor methods directly.
 type Value struct {
+	item *item
 	doc  *Doc
+
 	kind Kind
 	val  any
 }
 
-func newValueFromBackend(bv *backendValue, d *Doc) *Value {
-	v := &Value{doc: d, kind: bv.kind}
-	switch bv.kind {
+func newValue(i *item, d *Doc) *Value {
+	v := &Value{item: i, doc: d}
+	v.kind = v.item.Kind()
+	var objID *objID
+	if v.kind == kindObjType {
+		objID = v.item.objID()
+		v.kind = objID.objKind(d)
+	}
+
+	switch v.kind {
 	case KindNull, KindVoid, KindUnknown:
+		// TODO: handle unknown values better?
 		v.val = nil
 	case KindBool:
-		v.val = bv.val
+		v.val = v.item.bool()
 	case KindStr:
-		v.val = bv.val
+		v.val = v.item.str()
 	case KindBytes:
-		v.val = bv.val
+		v.val = v.item.bytes()
 	case KindFloat64:
-		v.val = bv.val
+		v.val = v.item.float64()
 	case KindInt64:
-		v.val = bv.val
+		v.val = v.item.int64()
 	case KindUint64:
-		v.val = bv.val
+		v.val = v.item.uint64()
 	case KindTime:
-		v.val = bv.val
+		v.val = v.item.time()
 	case KindCounter:
-		v.val = &Counter{val: bv.val.(int64)}
+		v.val = v.item.counter()
 	case KindMap:
-		v.val = &Map{doc: d, handle: bv.obj}
+		v.val = &Map{doc: d, objID: objID}
 	case KindList:
-		v.val = &List{doc: d, handle: bv.obj}
+		v.val = &List{doc: d, objID: objID}
 	case KindText:
-		v.val = &Text{doc: d, handle: bv.obj}
+		v.val = &Text{doc: d, objID: objID}
 	default:
-		panic(fmt.Errorf("tried to create Value with Kind == %v", bv.kind))
+		panic(fmt.Errorf("tried to create Value with Kind == %v", v.kind))
 	}
+
 	return v
 }
 
-func newValueInMap(bv *backendValue, m *Map, key string) *Value {
-	v := newValueFromBackend(bv, m.doc)
+func newValueInMap(i *item, m *Map, key string) *Value {
+	v := newValue(i, m.doc)
 	if c, ok := v.val.(*Counter); ok {
 		c.m = m
 		c.key = key
@@ -59,8 +70,8 @@ func newValueInMap(bv *backendValue, m *Map, key string) *Value {
 	return v
 }
 
-func newValueInList(bv *backendValue, l *List, idx int) *Value {
-	v := newValueFromBackend(bv, l.doc)
+func newValueInList(i *item, l *List, idx int) *Value {
+	v := newValue(i, l.doc)
 	if c, ok := v.val.(*Counter); ok {
 		c.l = l
 		c.idx = idx
@@ -168,6 +179,8 @@ func (v *Value) Interface() any {
 	switch v.kind {
 	case KindMap:
 		values, err := v.Map().Values()
+		// this should not be able to happen because .load() is only
+		// called from Value.Interface() which checks that this is a map.
 		if err != nil {
 			panic(err)
 		}
@@ -178,6 +191,7 @@ func (v *Value) Interface() any {
 		return out
 	case KindList:
 		values, err := v.List().Values()
+		// cannot happen as we know the value must have come from the doc
 		if err != nil {
 			panic(err)
 		}
@@ -188,12 +202,14 @@ func (v *Value) Interface() any {
 		return out
 	case KindText:
 		s, err := v.Text().Get()
+		// cannot happen as we know the value must have come from the doc
 		if err != nil {
 			panic(err)
 		}
 		return s
 	case KindCounter:
 		c, err := v.Counter().Get()
+		// cannot happen as we know the value must have come from the doc
 		if err != nil {
 			panic(err)
 		}
@@ -215,6 +231,7 @@ func (v *Value) GoString() string {
 }
 
 // String returns a representation suitable for debugging.
+// Use [Value.Str] to get the underlying string.
 func (v *Value) String() string {
 	return v.GoString()
 }

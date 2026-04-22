@@ -46,7 +46,8 @@ pub extern "C" fn am_obj_size(obj_handle: u32) -> u32 {
 
 /// Get the total byte length of null-separated keys for a map object.
 ///
-/// Each key is followed by a null byte. Returns 0 if empty, invalid handle, or not a map.
+/// Keys are encoded as: [4-byte LE key_len][key bytes] repeated.
+/// Returns 0 if empty, invalid handle, or not a map.
 #[no_mangle]
 pub extern "C" fn am_obj_keys_len(obj_handle: u32) -> u32 {
     let obj_id = match resolve_obj(obj_handle) {
@@ -62,15 +63,16 @@ pub extern "C" fn am_obj_keys_len(obj_handle: u32) -> u32 {
         }
         let mut buf = Vec::new();
         for key in &keys {
-            buf.extend_from_slice(key.as_bytes());
-            buf.push(0); // null separator
+            let key_bytes = key.as_bytes();
+            buf.extend_from_slice(&(key_bytes.len() as u32).to_le_bytes());
+            buf.extend_from_slice(key_bytes);
         }
         set_return_buf(buf);
         return_buf_len() as u32
     }).unwrap_or(0)
 }
 
-/// Copy null-separated keys into a pre-allocated buffer.
+/// Copy length-prefixed keys into a pre-allocated buffer.
 ///
 /// Returns 0 on success, -1 if ptr null.
 #[no_mangle]

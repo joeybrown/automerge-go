@@ -527,7 +527,7 @@ func TestText(t *testing.T) {
 	require.Equal(t, "hello cool world!", v)
 
 	err = txt.Splice(100, 150, "test")
-	require.EqualError(t, err, "automerge.Text: failed to write: Invalid pos 100")
+	require.EqualError(t, err, "automerge.Text: failed to write: index 100 is out of bounds")
 
 	err = txt.Delete(6, 5)
 	require.NoError(t, err)

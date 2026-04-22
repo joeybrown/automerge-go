@@ -1,7 +1,7 @@
 //! Document lifecycle management: create, save, load, merge, fork, clone.
 
 use automerge::AutoCommit;
-use crate::state::{init_doc, with_doc, with_doc_mut, set_return_buf, return_buf_len, copy_return_buf};
+use crate::state::{init_doc, with_doc, with_doc_mut, set_return_buf, return_buf_len, copy_return_buf, set_last_error};
 
 /// Create a new empty Automerge document.
 ///
@@ -82,7 +82,10 @@ pub extern "C" fn am_merge(other_ptr: *const u8, other_len: usize) -> i32 {
 
     match with_doc_mut(|doc| doc.merge(&mut other_doc)) {
         Some(Ok(_)) => 0,
-        Some(Err(_)) => -4,
+        Some(Err(e)) => {
+            set_last_error(format!("{}", e));
+            -4
+        }
         None => -2,
     }
 }

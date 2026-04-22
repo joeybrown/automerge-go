@@ -1,22 +1,33 @@
 package automerge
 
 import (
-	"context"
 	"fmt"
+	"runtime"
 	"time"
 )
 
+// #include "automerge.h"
+import "C"
+
 // List is an automerge type that stores a list of [Value]'s
 type List struct {
-	doc    *Doc
-	handle objHandle
-	path   *Path
+	doc   *Doc
+	objID *objID
+	path  *Path
 }
 
 // NewList returns a detached list.
 // Before you can read from or write to it you must write it to the document.
 func NewList() *List {
 	return &List{}
+}
+
+func (l *List) lock() (*C.AMdoc, *C.AMobjId, func()) {
+	cDoc, unlock := l.doc.lock()
+	return cDoc, l.objID.cObjID, func() {
+		runtime.KeepAlive(l)
+		unlock()
+	}
 }
 
 // Len returns the length of the list, or 0 on error
@@ -32,15 +43,9 @@ func (l *List) Len() int {
 		return v.List().Len()
 	}
 
-	b, unlock := l.doc.lock()
+	cDoc, cObj, unlock := l.lock()
 	defer unlock()
-
-	ctx := context.Background()
-	size, err := b.listLen(ctx, l.handle)
-	if err != nil {
-		return 0
-	}
-	return int(size)
+	return int(C.AMobjSize(cDoc, cObj, nil))
 }
 
 // Values returns a slice of the values in a list
@@ -62,23 +67,17 @@ func (l *List) Values() ([]*Value, error) {
 			return nil, fmt.Errorf("%#v: tried to read non-list %#v", l.path, v.val)
 		}
 	}
-
-	b, unlock := l.doc.lock()
+	cDoc, cObj, unlock := l.lock()
 	defer unlock()
 
-	ctx := context.Background()
-	length, err := b.listLen(ctx, l.handle)
+	items, err := wrap(C.AMlistRange(cDoc, cObj, 0, C.SIZE_MAX, nil)).items()
 	if err != nil {
 		return nil, err
 	}
 
-	ret := make([]*Value, 0, length)
-	for i := uint(0); i < length; i++ {
-		bv, err := b.listGet(ctx, l.handle, i)
-		if err != nil {
-			return nil, err
-		}
-		ret = append(ret, newValueInList(bv, l, int(i)))
+	ret := []*Value{}
+	for i, item := range items {
+		ret = append(ret, newValueInList(item, l, i))
 	}
 	return ret, nil
 }
@@ -92,26 +91,25 @@ func (l *List) Get(i int) (*Value, error) {
 		return l.path.Path(i).Get()
 	}
 
+	// make lists act more like maps
 	if i < 0 || i >= l.Len() {
 		return &Value{kind: KindVoid}, nil
 	}
 
-	b, unlock := l.doc.lock()
+	cDoc, cObj, unlock := l.lock()
 	defer unlock()
 
-	ctx := context.Background()
-	bv, err := b.listGet(ctx, l.handle, uint(i))
+	item, err := wrap(C.AMlistGet(cDoc, cObj, C.size_t(i), nil)).item()
 	if err != nil {
 		return nil, err
 	}
-	return newValueInList(bv, l, i), nil
+	return newValueInList(item, l, i), nil
 }
 
 // Append adds the values at the end of the list.
 func (l *List) Append(values ...any) error {
 	for _, v := range values {
-		length := l.Len()
-		if err := l.put(uint(length), true, v); err != nil {
+		if err := l.put(C.SIZE_MAX, true, v); err != nil {
 			return err
 		}
 	}
@@ -123,7 +121,7 @@ func (l *List) Set(idx int, value any) error {
 	if idx < 0 || idx >= l.Len() {
 		return fmt.Errorf("automerge.List: tried to write index %v beyond end of list length %v", idx, l.Len())
 	}
-	return l.put(uint(idx), false, value)
+	return l.put(C.size_t(idx), false, value)
 }
 
 // Insert inserts the new values just before idx.
@@ -132,7 +130,7 @@ func (l *List) Insert(idx int, value ...any) error {
 		return fmt.Errorf("automerge.List: tried to write index %v beyond end of list length %v", idx, l.Len())
 	}
 	for i, v := range value {
-		if err := l.put(uint(idx+i), true, v); err != nil {
+		if err := l.put(C.size_t(idx+i), true, v); err != nil {
 			return err
 		}
 	}
@@ -145,22 +143,20 @@ func (l *List) Delete(idx int) error {
 		return fmt.Errorf("automerge.List: tried to write index %v beyond end of list length %v", idx, l.Len())
 	}
 
-	b, unlock := l.doc.lock()
+	cDoc, cObj, unlock := l.lock()
 	defer unlock()
 
-	ctx := context.Background()
-	return b.listDelete(ctx, l.handle, uint(idx))
+	return wrap(C.AMlistDelete(cDoc, cObj, C.size_t(idx))).void()
 }
 
 func (l *List) inc(i int, delta int64) error {
-	b, unlock := l.doc.lock()
+	cDoc, cObj, unlock := l.lock()
 	defer unlock()
 
-	ctx := context.Background()
-	return b.listIncrement(ctx, l.handle, uint(i), delta)
+	return wrap(C.AMlistIncrement(cDoc, cObj, C.size_t(i), C.int64_t(delta))).void()
 }
 
-func (l *List) put(i uint, before bool, value any) error {
+func (l *List) put(i C.size_t, before bool, value any) error {
 	if l.doc == nil {
 		return fmt.Errorf("automerge.List: tried to write to detached list")
 	}
@@ -169,8 +165,7 @@ func (l *List) put(i uint, before bool, value any) error {
 		if err != nil {
 			return err
 		}
-		l.doc = l2.doc
-		l.handle = l2.handle
+		l.objID = l2.objID
 		l.path = nil
 	}
 
@@ -179,38 +174,39 @@ func (l *List) put(i uint, before bool, value any) error {
 		return err
 	}
 
-	b, unlock := l.doc.lock()
+	cDoc, cObj, unlock := l.lock()
 	defer unlock()
-	ctx := context.Background()
 
 	switch v := value.(type) {
 	case nil:
-		tag, payload := encodeNull()
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		err = wrap(C.AMlistPutNull(cDoc, cObj, i, C.bool(before))).void()
 	case bool:
-		tag, payload := encodeBool(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		err = wrap(C.AMlistPutBool(cDoc, cObj, i, C.bool(before), C.bool(v))).void()
 	case string:
-		tag, payload := encodeStr(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		vStr, free := toByteSpanStr(v)
+		defer free()
+		err = wrap(C.AMlistPutStr(cDoc, cObj, i, C.bool(before), vStr)).void()
+
 	case []byte:
-		tag, payload := encodeBytes(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		vBytes, free := toByteSpan(v)
+		defer free()
+		err = wrap(C.AMlistPutBytes(cDoc, cObj, i, C.bool(before), vBytes)).void()
+
 	case int64:
-		tag, payload := encodeInt64(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		err = wrap(C.AMlistPutInt(cDoc, cObj, i, C.bool(before), C.int64_t(v))).void()
+
 	case uint64:
-		tag, payload := encodeUint64(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		err = wrap(C.AMlistPutUint(cDoc, cObj, i, C.bool(before), C.uint64_t(v))).void()
+
 	case float64:
-		tag, payload := encodeFloat64(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		err = wrap(C.AMlistPutF64(cDoc, cObj, i, C.bool(before), C.double(v))).void()
+
 	case time.Time:
-		tag, payload := encodeTimestamp(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		err = wrap(C.AMlistPutTimestamp(cDoc, cObj, i, C.bool(before), C.int64_t(v.UnixMilli()))).void()
 
 	case []any:
 		unlock()
+
 		nl := NewList()
 		if err := l.put(i, before, nl); err != nil {
 			return err
@@ -219,6 +215,7 @@ func (l *List) put(i uint, before bool, value any) error {
 
 	case map[string]any:
 		unlock()
+
 		nm := NewMap()
 		if err := l.put(i, before, nm); err != nil {
 			return err
@@ -231,54 +228,51 @@ func (l *List) put(i uint, before bool, value any) error {
 
 	case *Counter:
 		if v.m != nil || v.l != nil {
-			return fmt.Errorf("automerge.List: tried to move an attached *automerge.Counter")
+			return fmt.Errorf("automerge.List: tried to move an attached *automerge.Text")
 		}
-		tag, payload := encodeCounter(v.val)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+
+		err = wrap(C.AMlistPutCounter(cDoc, cObj, i, C.bool(before), C.int64_t(v.val))).void()
 		if err == nil {
 			v.l = l
 			v.idx = int(i)
 		}
 
 	case *Text:
-		if v.doc != nil {
+		if v.objID != nil {
 			return fmt.Errorf("automerge.List: tried to move an attached *automerge.Text")
 		}
-		h, putErr := b.listPut(ctx, l.handle, i, before, tagText, nil)
-		if putErr != nil {
-			err = putErr
-			break
+		item, err := wrap(C.AMlistPutObject(cDoc, cObj, i, C.bool(before), C.AM_OBJ_TYPE_TEXT)).item()
+		if err != nil {
+			return err
 		}
 		v.doc = l.doc
-		v.handle = h
+		v.objID = item.objID()
 		unlock()
 		if err := v.Set(v.val); err != nil {
 			return err
 		}
 
 	case *Map:
-		if v.doc != nil {
+		if v.objID != nil {
 			return fmt.Errorf("automerge.List: tried to move an attached *automerge.Map")
 		}
-		h, putErr := b.listPut(ctx, l.handle, i, before, tagMap, nil)
-		if putErr != nil {
-			err = putErr
-			break
+		item, err := wrap(C.AMlistPutObject(cDoc, cObj, i, C.bool(before), C.AM_OBJ_TYPE_MAP)).item()
+		if err != nil {
+			return err
 		}
 		v.doc = l.doc
-		v.handle = h
+		v.objID = item.objID()
 
 	case *List:
-		if v.doc != nil {
+		if v.objID != nil {
 			return fmt.Errorf("automerge.List: tried to move an attached *automerge.List")
 		}
-		h, putErr := b.listPut(ctx, l.handle, i, before, tagList, nil)
-		if putErr != nil {
-			err = putErr
-			break
+		item, err := wrap(C.AMlistPutObject(cDoc, cObj, i, C.bool(before), C.AM_OBJ_TYPE_LIST)).item()
+		if err != nil {
+			return err
 		}
 		v.doc = l.doc
-		v.handle = h
+		v.objID = item.objID()
 
 	default:
 		err = fmt.Errorf("automerge.List: tried to write unsupported value %#v", value)

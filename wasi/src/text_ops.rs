@@ -2,7 +2,7 @@
 
 use automerge::ReadDoc;
 use automerge::transaction::Transactable;
-use crate::state::{with_doc, with_doc_mut, resolve_obj, set_return_buf, return_buf_len, copy_return_buf};
+use crate::state::{with_doc, with_doc_mut, resolve_obj, set_return_buf, return_buf_len, copy_return_buf, set_last_error};
 
 /// Splice text at the given position in a Text object.
 ///
@@ -35,7 +35,10 @@ pub extern "C" fn am_text_splice(
 
     match with_doc_mut(|doc| doc.splice_text(&obj_id, pos, del as isize, insert_text)) {
         Some(Ok(_)) => 0,
-        Some(Err(_)) => -5,
+        Some(Err(e)) => {
+            set_last_error(format!("{}", e));
+            -5
+        }
         None => -2,
     }
 }

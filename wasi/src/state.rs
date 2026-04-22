@@ -75,6 +75,8 @@ thread_local! {
     pub(crate) static OBJ_TABLE: RefCell<ObjHandleTable> = RefCell::new(ObjHandleTable::new());
     // Buffer for returning variable-length data to the caller
     pub(crate) static RETURN_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+    // Last error string for detailed error reporting
+    pub(crate) static LAST_ERROR: RefCell<String> = RefCell::new(String::new());
 }
 
 /// Initialize the global document
@@ -149,6 +151,43 @@ pub(crate) fn copy_return_buf(ptr: *mut u8) {
             }
         }
     });
+}
+
+/// Store a last-error string
+pub(crate) fn set_last_error(msg: String) {
+    LAST_ERROR.with(|cell| {
+        *cell.borrow_mut() = msg;
+    });
+}
+
+/// Clear the last error
+pub(crate) fn clear_last_error() {
+    LAST_ERROR.with(|cell| {
+        cell.borrow_mut().clear();
+    });
+}
+
+/// Get the last error length. Returns 0 if no error.
+#[no_mangle]
+pub extern "C" fn am_last_error_len() -> u32 {
+    LAST_ERROR.with(|cell| cell.borrow().len() as u32)
+}
+
+/// Copy the last error into a pre-allocated buffer.
+#[no_mangle]
+pub extern "C" fn am_last_error(ptr_out: *mut u8) -> i32 {
+    if ptr_out.is_null() {
+        return -1;
+    }
+    LAST_ERROR.with(|cell| {
+        let err = cell.borrow();
+        if !err.is_empty() {
+            unsafe {
+                std::ptr::copy_nonoverlapping(err.as_ptr(), ptr_out, err.len());
+            }
+        }
+    });
+    0
 }
 
 // ── Debug exports for investigating RETURN_BUF corruption ──
