@@ -52,12 +52,6 @@ type changeInfo struct {
 	deps      []ChangeHash
 }
 
-// mapEntry is a key-value pair for map iteration.
-type mapEntry struct {
-	key string
-	val *backendValue
-}
-
 // backend is the internal interface that abstracts the automerge engine.
 // It is implemented by wazeroBackend. This interface is NOT part of the public API.
 type backend interface {
@@ -123,11 +117,4 @@ type backend interface {
 	syncReceiveMessage(ctx context.Context, peerID uint32, msg []byte) error
 	syncSave(ctx context.Context, peerID uint32) ([]byte, error)
 	syncLoad(ctx context.Context, data []byte) (uint32, error)
-}
-
-func must[T any](r T, e error) T {
-	if e != nil {
-		panic(e)
-	}
-	return r
 }

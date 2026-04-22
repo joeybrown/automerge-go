@@ -1,3 +1,4 @@
+package automerge
 package automerge_test
 
 import (

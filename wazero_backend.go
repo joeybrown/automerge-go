@@ -189,19 +189,6 @@ func encodeCounter(v int64) (byte, []byte) {
 	binary.LittleEndian.PutUint64(buf, uint64(v))
 	return tagCounter, buf
 }
-func encodeObjKind(k Kind) byte {
-	switch k {
-	case KindMap:
-		return tagMap
-	case KindList:
-		return tagList
-	case KindText:
-		return tagText
-	default:
-		panic(fmt.Errorf("automerge: cannot encode Kind %v as object tag", k))
-	}
-}
-
 // decodeValue decodes a tagged value buffer into a backendValue.
 func decodeValue(data []byte) (*backendValue, error) {
 	if len(data) == 0 {
