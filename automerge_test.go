@@ -526,6 +526,10 @@ func TestText(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "hello cool world!", v)
 
+	// NOTE: The wazero/WASM backend produces a different error message than the
+	// upstream cgo backend for out-of-bounds text splice. Upstream says:
+	//   "automerge.Text: failed to write: Invalid pos 100"
+	// This is the only known behavioral difference from the cgo implementation.
 	err = txt.Splice(100, 150, "test")
 	require.EqualError(t, err, "automerge.Text: failed to write: index 100 is out of bounds")
 
