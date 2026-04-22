@@ -3,8 +3,30 @@
 ## STATUS: COMPLETE
 
 All Rust modules built and tested (37/37 Rust tests pass).
-WASM binary built (1014KB release, wasm32-wasip1).
-Go smoke tests via wazero pass (14/14 tests pass).
+WASM binary built (1038KB release, wasm32-wasip1).
+Go smoke tests via wazero pass (20/20 tests pass).
+
+### wazero Memory.Read() gotcha (root-caused)
+
+Initial tests showed apparent "RETURN_BUF corruption" when `am_alloc` was called
+between `_len`/`_get` pairs. Investigation proved this was **not** a Rust allocator
+bug or a RETURN_BUF issue. The actual root cause:
+
+**wazero's `Memory().Read()` returns a slice (view) into the WASM linear memory
+buffer, not a copy.** When Go test code did `got := readBytes(ptr, n)` followed
+by `free(ptr, n)`, the `am_free` call told dlmalloc to reclaim the memory at
+`ptr`, and dlmalloc wrote free-list metadata over those bytes. Since `got` was a
+view into the same backing array, the Go slice saw corrupted free-list pointers
+(`0x0841110008`) instead of the original data (`0x0562657461` = TAG_STRING+"beta").
+
+**Fix**: `readBytes()` now copies the view to a Go-owned `[]byte`. This is the
+correct pattern for all wazero memory reads — any subsequent WASM call can modify
+linear memory, invalidating previously-returned views.
+
+**Implication for Phase 1+**: The Go `wazeroBackend` must always copy data out
+of WASM memory before making any further WASM calls. The `_len`/`_get` two-call
+pattern in the Rust WASI module is fine; the caller just needs to copy the result
+before freeing the output buffer or calling other exports.
 
 ## Overview
 

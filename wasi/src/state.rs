@@ -151,6 +151,42 @@ pub(crate) fn copy_return_buf(ptr: *mut u8) {
     });
 }
 
+// ── Debug exports for investigating RETURN_BUF corruption ──
+
+/// Return the raw WASM address of RETURN_BUF's data.
+#[no_mangle]
+pub extern "C" fn am_debug_return_buf_ptr() -> u32 {
+    RETURN_BUF.with(|cell| {
+        let buf = cell.borrow();
+        if buf.is_empty() {
+            0
+        } else {
+            buf.as_ptr() as u32
+        }
+    })
+}
+
+/// Return a single byte from RETURN_BUF by index, or -1 if OOB.
+#[no_mangle]
+pub extern "C" fn am_debug_return_buf_byte(idx: u32) -> i32 {
+    RETURN_BUF.with(|cell| {
+        let buf = cell.borrow();
+        if (idx as usize) < buf.len() {
+            buf[idx as usize] as i32
+        } else {
+            -1
+        }
+    })
+}
+
+/// Return RETURN_BUF capacity (to check if Vec was reallocated).
+#[no_mangle]
+pub extern "C" fn am_debug_return_buf_cap() -> u32 {
+    RETURN_BUF.with(|cell| {
+        cell.borrow().capacity() as u32
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
