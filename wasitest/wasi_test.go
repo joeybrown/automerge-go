@@ -12,7 +12,7 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
 
-const wasmPath = "../automerge.wasm"
+const wasmPath = "../internal/wazero/automerge.wasm"
 
 // runtime wraps a wazero module instance for calling WASI exports.
 type runtime struct {

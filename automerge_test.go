@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/automerge/automerge-go"
+	"github.com/joeybrown/automerge-go"
 	"github.com/stretchr/testify/require"
 )
 

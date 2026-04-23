@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/joeybrown/automerge-go/internal/backend"
 )
 
 // Map is an automerge type that stores a map of strings to values
 type Map struct {
 	doc    *Doc
-	handle objHandle
+	handle backend.ObjHandle
 	path   *Path
 }
 
@@ -47,7 +49,7 @@ func (m *Map) Get(key string) (*Value, error) {
 	defer unlock()
 
 	ctx := context.Background()
-	bv, err := b.mapGet(ctx, m.handle, key)
+	bv, err := b.MapGet(ctx, m.handle, key)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +73,7 @@ func (m *Map) Len() int {
 	defer unlock()
 
 	ctx := context.Background()
-	size, err := b.objSize(ctx, m.handle)
+	size, err := b.ObjSize(ctx, m.handle)
 	if err != nil {
 		return 0
 	}
@@ -91,7 +93,7 @@ func (m *Map) Delete(key string) error {
 	defer unlock()
 
 	ctx := context.Background()
-	return b.mapDelete(ctx, m.handle, key)
+	return b.MapDelete(ctx, m.handle, key)
 }
 
 // Set sets a key in the map to a given value.
@@ -114,36 +116,36 @@ func (m *Map) Set(key string, value any) error {
 
 	switch v := value.(type) {
 	case nil:
-		tag, payload := encodeNull()
-		_, err = b.mapPut(ctx, m.handle, key, tag, payload)
+		tag, payload := backend.EncodeNull()
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case bool:
-		tag, payload := encodeBool(v)
-		_, err = b.mapPut(ctx, m.handle, key, tag, payload)
+		tag, payload := backend.EncodeBool(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case string:
-		tag, payload := encodeStr(v)
-		_, err = b.mapPut(ctx, m.handle, key, tag, payload)
+		tag, payload := backend.EncodeStr(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case []byte:
-		tag, payload := encodeBytes(v)
-		_, err = b.mapPut(ctx, m.handle, key, tag, payload)
+		tag, payload := backend.EncodeBytes(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case int64:
-		tag, payload := encodeInt64(v)
-		_, err = b.mapPut(ctx, m.handle, key, tag, payload)
+		tag, payload := backend.EncodeInt64(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case uint64:
-		tag, payload := encodeUint64(v)
-		_, err = b.mapPut(ctx, m.handle, key, tag, payload)
+		tag, payload := backend.EncodeUint64(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case float64:
-		tag, payload := encodeFloat64(v)
-		_, err = b.mapPut(ctx, m.handle, key, tag, payload)
+		tag, payload := backend.EncodeFloat64(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case time.Time:
-		tag, payload := encodeTimestamp(v)
-		_, err = b.mapPut(ctx, m.handle, key, tag, payload)
+		tag, payload := backend.EncodeTimestamp(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case []any:
 		unlock()
@@ -172,7 +174,7 @@ func (m *Map) Set(key string, value any) error {
 			return fmt.Errorf("automerge.Map: tried to move an existing *automerge.Map")
 		}
 
-		h, putErr := b.mapPut(ctx, m.handle, key, tagMap, nil)
+		h, putErr := b.MapPut(ctx, m.handle, key, backend.TagMap, nil)
 		if putErr != nil {
 			err = putErr
 			break
@@ -185,7 +187,7 @@ func (m *Map) Set(key string, value any) error {
 			return fmt.Errorf("automerge.Map: tried to move an existing *automerge.List")
 		}
 
-		h, putErr := b.mapPut(ctx, m.handle, key, tagList, nil)
+		h, putErr := b.MapPut(ctx, m.handle, key, backend.TagList, nil)
 		if putErr != nil {
 			err = putErr
 			break
@@ -198,8 +200,8 @@ func (m *Map) Set(key string, value any) error {
 			return fmt.Errorf("automerge.Map: tried to move an existing *automerge.Counter")
 		}
 
-		tag, payload := encodeCounter(v.val)
-		_, err = b.mapPut(ctx, m.handle, key, tag, payload)
+		tag, payload := backend.EncodeCounter(v.val)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 		if err == nil {
 			v.m = m
 			v.key = key
@@ -209,7 +211,7 @@ func (m *Map) Set(key string, value any) error {
 		if v.doc != nil {
 			return fmt.Errorf("automerge.Map: tried to move an existing *automerge.Text")
 		}
-		h, putErr := b.mapPut(ctx, m.handle, key, tagText, nil)
+		h, putErr := b.MapPut(ctx, m.handle, key, backend.TagText, nil)
 		if putErr != nil {
 			err = putErr
 			break
@@ -233,7 +235,7 @@ func (m *Map) inc(key string, delta int64) error {
 	defer unlock()
 
 	ctx := context.Background()
-	return b.mapIncrement(ctx, m.handle, key, delta)
+	return b.MapIncrement(ctx, m.handle, key, delta)
 }
 
 // Values returns the values of the map
@@ -261,14 +263,14 @@ func (m *Map) Values() (map[string]*Value, error) {
 
 	ctx := context.Background()
 
-	keys, err := b.objKeys(ctx, m.handle)
+	keys, err := b.ObjKeys(ctx, m.handle)
 	if err != nil {
 		return nil, err
 	}
 
 	ret := map[string]*Value{}
 	for _, key := range keys {
-		bv, err := b.mapGet(ctx, m.handle, key)
+		bv, err := b.MapGet(ctx, m.handle, key)
 		if err != nil {
 			return nil, err
 		}

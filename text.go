@@ -3,6 +3,8 @@ package automerge
 import (
 	"context"
 	"fmt"
+
+	"github.com/joeybrown/automerge-go/internal/backend"
 )
 
 // Text is a mutable unicode string that can be edited collaboratively.
@@ -12,7 +14,7 @@ import (
 // When editing Text you must pass positions and counts in terms of codepoints not bytes.
 type Text struct {
 	doc    *Doc
-	handle objHandle
+	handle backend.ObjHandle
 	path   *Path
 
 	val string
@@ -42,7 +44,7 @@ func (t *Text) Len() int {
 	defer unlock()
 
 	ctx := context.Background()
-	size, err := b.objSize(ctx, t.handle)
+	size, err := b.ObjSize(ctx, t.handle)
 	if err != nil {
 		return 0
 	}
@@ -73,7 +75,7 @@ func (t *Text) Get() (string, error) {
 	defer unlock()
 
 	ctx := context.Background()
-	return b.textGet(ctx, t.handle)
+	return b.TextGet(ctx, t.handle)
 }
 
 // Set overwrites the entire string with a new value,
@@ -125,7 +127,7 @@ func (t *Text) splice(pos uint, del int, s string) error {
 	defer unlock()
 
 	ctx := context.Background()
-	err := b.textSplice(ctx, t.handle, pos, del, s)
+	err := b.TextSplice(ctx, t.handle, pos, del, s)
 	if err != nil {
 		return fmt.Errorf("automerge.Text: failed to write: %w", err)
 	}

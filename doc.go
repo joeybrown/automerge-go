@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/joeybrown/automerge-go/internal/backend"
+	wazerobackend "github.com/joeybrown/automerge-go/internal/wazero"
 )
 
 // Doc represents an automerge document. You can read and write the
@@ -18,11 +21,11 @@ import (
 // explicitly create a [Change], though if you forget to do this most methods
 // on a document will create an anonymous change on your behalf.
 type Doc struct {
-	b backend
+	b backend.Backend
 	m sync.Mutex
 }
 
-func (d *Doc) lock() (backend, func()) {
+func (d *Doc) lock() (backend.Backend, func()) {
 	d.m.Lock()
 	locked := true
 	return d.b, func() {
@@ -36,16 +39,9 @@ func (d *Doc) lock() (backend, func()) {
 // New creates a new empty document
 func New() *Doc {
 	ctx := context.Background()
-	b, err := newWazeroBackend(ctx)
+	b, err := wazerobackend.NewBackend(ctx)
 	if err != nil {
 		panic(fmt.Errorf("automerge.New: %w", err))
-	}
-	res, err := b.call(ctx, "am_create")
-	if err != nil {
-		panic(fmt.Errorf("automerge.New: %w", err))
-	}
-	if int32(res[0]) != 0 {
-		panic(fmt.Errorf("automerge.New: am_create failed: %d", int32(res[0])))
 	}
 	return &Doc{b: b}
 }
@@ -53,25 +49,9 @@ func New() *Doc {
 // Load loads a document from its serialized form
 func Load(raw []byte) (*Doc, error) {
 	ctx := context.Background()
-	b, err := newWazeroBackend(ctx)
+	b, err := wazerobackend.LoadBackend(ctx, raw)
 	if err != nil {
 		return nil, err
-	}
-	ptr, size, err := b.writeBytes(ctx, raw)
-	if err != nil {
-		b.close(ctx)
-		return nil, err
-	}
-	defer b.free(ctx, ptr, size)
-
-	res, err := b.call(ctx, "am_load", uint64(ptr), uint64(size))
-	if err != nil {
-		b.close(ctx)
-		return nil, err
-	}
-	if int32(res[0]) != 0 {
-		b.close(ctx)
-		return nil, fmt.Errorf("automerge: failed to load document")
 	}
 	return &Doc{b: b}, nil
 }
@@ -82,7 +62,7 @@ func (d *Doc) Save() []byte {
 	defer unlock()
 
 	ctx := context.Background()
-	data, err := b.save(ctx)
+	data, err := b.Save(ctx)
 	if err != nil {
 		panic(fmt.Errorf("automerge.Doc.Save: %w", err))
 	}
@@ -91,7 +71,7 @@ func (d *Doc) Save() []byte {
 
 // RootMap returns the root of the document as a Map
 func (d *Doc) RootMap() *Map {
-	return &Map{doc: d, handle: rootObjHandle}
+	return &Map{doc: d, handle: backend.RootObjHandle}
 }
 
 // Root returns the root of the document as a Value
@@ -141,15 +121,15 @@ func (d *Doc) Commit(msg string, opts ...CommitOptions) (ChangeHash, error) {
 	}
 
 	ctx := context.Background()
-	ch, err := b.commit(ctx, msg, millis)
+	ch, err := b.Commit(ctx, msg, millis)
 	if err != nil {
-		if !errors.Is(err, errEmptyCommit) {
+		if !errors.Is(err, backend.ErrEmptyCommit) {
 			return ChangeHash{}, err
 		}
 		if !allowEmpty {
 			return ChangeHash{}, fmt.Errorf("Commit is empty")
 		}
-		ch, err = b.emptyChange(ctx, msg, millis)
+		ch, err = b.EmptyChange(ctx, msg, millis)
 		if err != nil {
 			return ChangeHash{}, err
 		}
@@ -163,7 +143,7 @@ func (d *Doc) Heads() []ChangeHash {
 	defer unlock()
 
 	ctx := context.Background()
-	hashes, err := b.heads(ctx)
+	hashes, err := b.Heads(ctx)
 	if err != nil {
 		panic(fmt.Errorf("automerge.Doc.Heads: %w", err))
 	}
@@ -176,7 +156,7 @@ func (d *Doc) Change(ch ChangeHash) (*Change, error) {
 	defer unlock()
 
 	ctx := context.Background()
-	raw, err := b.getChangeByHash(ctx, ch)
+	raw, err := b.GetChangeByHash(ctx, ch)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +164,7 @@ func (d *Doc) Change(ch ChangeHash) (*Change, error) {
 		return nil, fmt.Errorf("hash %s does not correspond to a change in this document", ch)
 	}
 
-	info, err := b.changeInfo(ctx, raw)
+	info, err := b.GetChangeInfo(ctx, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -198,14 +178,14 @@ func (d *Doc) Changes(since ...ChangeHash) ([]*Change, error) {
 	defer unlock()
 
 	ctx := context.Background()
-	rawChanges, err := b.getChanges(ctx, since)
+	rawChanges, err := b.GetChanges(ctx, since)
 	if err != nil {
 		return nil, err
 	}
 
 	changes := make([]*Change, len(rawChanges))
 	for i, raw := range rawChanges {
-		info, err := b.changeInfo(ctx, raw)
+		info, err := b.GetChangeInfo(ctx, raw)
 		if err != nil {
 			return nil, err
 		}
@@ -229,7 +209,7 @@ func (d *Doc) Apply(chs ...*Change) error {
 	defer unlock()
 
 	ctx := context.Background()
-	return b.applyChanges(ctx, rawChanges)
+	return b.ApplyChanges(ctx, rawChanges)
 }
 
 // SaveIncremental exports the changes since the last call to [Doc.Save] or
@@ -239,7 +219,7 @@ func (d *Doc) SaveIncremental() []byte {
 	defer unlock()
 
 	ctx := context.Background()
-	data, err := b.saveIncremental(ctx)
+	data, err := b.SaveIncremental(ctx)
 	if err != nil {
 		panic(fmt.Errorf("automerge.Doc.SaveIncremental: %w", err))
 	}
@@ -252,7 +232,7 @@ func (d *Doc) LoadIncremental(raw []byte) error {
 	defer unlock()
 
 	ctx := context.Background()
-	return b.loadIncremental(ctx, raw)
+	return b.LoadIncremental(ctx, raw)
 }
 
 // Fork returns a new, independent, copy of the document
@@ -263,7 +243,7 @@ func (d *Doc) Fork(asOf ...ChangeHash) (*Doc, error) {
 	defer unlock()
 
 	ctx := context.Background()
-	nb, err := b.fork(ctx, asOf)
+	nb, err := b.Fork(ctx, asOf)
 	if err != nil {
 		return nil, err
 	}
@@ -280,12 +260,12 @@ func (d *Doc) Merge(d2 *Doc) ([]ChangeHash, error) {
 	defer unlock()
 
 	ctx := context.Background()
-	if err := b.merge(ctx, d2Bytes); err != nil {
+	if err := b.Merge(ctx, d2Bytes); err != nil {
 		return nil, err
 	}
 
 	// Return the new heads after merge
-	hashes, err := b.heads(ctx)
+	hashes, err := b.Heads(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +278,7 @@ func (d *Doc) ActorID() string {
 	defer unlock()
 
 	ctx := context.Background()
-	id, err := b.getActorID(ctx)
+	id, err := b.GetActorID(ctx)
 	if err != nil {
 		panic(fmt.Errorf("automerge.Doc.ActorID: %w", err))
 	}
@@ -317,7 +297,7 @@ func (d *Doc) SetActorID(id string) error {
 	defer unlock()
 
 	ctx := context.Background()
-	return b.setActorID(ctx, id)
+	return b.SetActorID(ctx, id)
 }
 
 // NewActorID generates a new unique actor id.

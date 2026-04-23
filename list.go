@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/joeybrown/automerge-go/internal/backend"
 )
 
 // List is an automerge type that stores a list of [Value]'s
 type List struct {
 	doc    *Doc
-	handle objHandle
+	handle backend.ObjHandle
 	path   *Path
 }
 
@@ -36,7 +38,7 @@ func (l *List) Len() int {
 	defer unlock()
 
 	ctx := context.Background()
-	size, err := b.listLen(ctx, l.handle)
+	size, err := b.ListLen(ctx, l.handle)
 	if err != nil {
 		return 0
 	}
@@ -67,14 +69,14 @@ func (l *List) Values() ([]*Value, error) {
 	defer unlock()
 
 	ctx := context.Background()
-	length, err := b.listLen(ctx, l.handle)
+	length, err := b.ListLen(ctx, l.handle)
 	if err != nil {
 		return nil, err
 	}
 
 	ret := make([]*Value, 0, length)
 	for i := uint(0); i < length; i++ {
-		bv, err := b.listGet(ctx, l.handle, i)
+		bv, err := b.ListGet(ctx, l.handle, i)
 		if err != nil {
 			return nil, err
 		}
@@ -100,7 +102,7 @@ func (l *List) Get(i int) (*Value, error) {
 	defer unlock()
 
 	ctx := context.Background()
-	bv, err := b.listGet(ctx, l.handle, uint(i))
+	bv, err := b.ListGet(ctx, l.handle, uint(i))
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +151,7 @@ func (l *List) Delete(idx int) error {
 	defer unlock()
 
 	ctx := context.Background()
-	return b.listDelete(ctx, l.handle, uint(idx))
+	return b.ListDelete(ctx, l.handle, uint(idx))
 }
 
 func (l *List) inc(i int, delta int64) error {
@@ -157,7 +159,7 @@ func (l *List) inc(i int, delta int64) error {
 	defer unlock()
 
 	ctx := context.Background()
-	return b.listIncrement(ctx, l.handle, uint(i), delta)
+	return b.ListIncrement(ctx, l.handle, uint(i), delta)
 }
 
 func (l *List) put(i uint, before bool, value any) error {
@@ -185,29 +187,29 @@ func (l *List) put(i uint, before bool, value any) error {
 
 	switch v := value.(type) {
 	case nil:
-		tag, payload := encodeNull()
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		tag, payload := backend.EncodeNull()
+		_, err = b.ListPut(ctx, l.handle, i, before, tag, payload)
 	case bool:
-		tag, payload := encodeBool(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		tag, payload := backend.EncodeBool(v)
+		_, err = b.ListPut(ctx, l.handle, i, before, tag, payload)
 	case string:
-		tag, payload := encodeStr(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		tag, payload := backend.EncodeStr(v)
+		_, err = b.ListPut(ctx, l.handle, i, before, tag, payload)
 	case []byte:
-		tag, payload := encodeBytes(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		tag, payload := backend.EncodeBytes(v)
+		_, err = b.ListPut(ctx, l.handle, i, before, tag, payload)
 	case int64:
-		tag, payload := encodeInt64(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		tag, payload := backend.EncodeInt64(v)
+		_, err = b.ListPut(ctx, l.handle, i, before, tag, payload)
 	case uint64:
-		tag, payload := encodeUint64(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		tag, payload := backend.EncodeUint64(v)
+		_, err = b.ListPut(ctx, l.handle, i, before, tag, payload)
 	case float64:
-		tag, payload := encodeFloat64(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		tag, payload := backend.EncodeFloat64(v)
+		_, err = b.ListPut(ctx, l.handle, i, before, tag, payload)
 	case time.Time:
-		tag, payload := encodeTimestamp(v)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		tag, payload := backend.EncodeTimestamp(v)
+		_, err = b.ListPut(ctx, l.handle, i, before, tag, payload)
 
 	case []any:
 		unlock()
@@ -233,8 +235,8 @@ func (l *List) put(i uint, before bool, value any) error {
 		if v.m != nil || v.l != nil {
 			return fmt.Errorf("automerge.List: tried to move an attached *automerge.Counter")
 		}
-		tag, payload := encodeCounter(v.val)
-		_, err = b.listPut(ctx, l.handle, i, before, tag, payload)
+		tag, payload := backend.EncodeCounter(v.val)
+		_, err = b.ListPut(ctx, l.handle, i, before, tag, payload)
 		if err == nil {
 			v.l = l
 			v.idx = int(i)
@@ -244,7 +246,7 @@ func (l *List) put(i uint, before bool, value any) error {
 		if v.doc != nil {
 			return fmt.Errorf("automerge.List: tried to move an attached *automerge.Text")
 		}
-		h, putErr := b.listPut(ctx, l.handle, i, before, tagText, nil)
+		h, putErr := b.ListPut(ctx, l.handle, i, before, backend.TagText, nil)
 		if putErr != nil {
 			err = putErr
 			break
@@ -260,7 +262,7 @@ func (l *List) put(i uint, before bool, value any) error {
 		if v.doc != nil {
 			return fmt.Errorf("automerge.List: tried to move an attached *automerge.Map")
 		}
-		h, putErr := b.listPut(ctx, l.handle, i, before, tagMap, nil)
+		h, putErr := b.ListPut(ctx, l.handle, i, before, backend.TagMap, nil)
 		if putErr != nil {
 			err = putErr
 			break
@@ -272,7 +274,7 @@ func (l *List) put(i uint, before bool, value any) error {
 		if v.doc != nil {
 			return fmt.Errorf("automerge.List: tried to move an attached *automerge.List")
 		}
-		h, putErr := b.listPut(ctx, l.handle, i, before, tagList, nil)
+		h, putErr := b.ListPut(ctx, l.handle, i, before, backend.TagList, nil)
 		if putErr != nil {
 			err = putErr
 			break

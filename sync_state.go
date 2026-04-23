@@ -19,7 +19,7 @@ func NewSyncState(d *Doc) *SyncState {
 	defer unlock()
 
 	ctx := context.Background()
-	peerID, err := b.syncInit(ctx)
+	peerID, err := b.SyncInit(ctx)
 	if err != nil {
 		panic(fmt.Errorf("automerge.NewSyncState: %w", err))
 	}
@@ -32,7 +32,7 @@ func LoadSyncState(d *Doc, raw []byte) (*SyncState, error) {
 	defer unlock()
 
 	ctx := context.Background()
-	peerID, err := b.syncLoad(ctx, raw)
+	peerID, err := b.SyncLoad(ctx, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (ss *SyncState) ReceiveMessage(msg []byte) (*SyncMessage, error) {
 	defer unlock()
 
 	ctx := context.Background()
-	if err := b.syncReceiveMessage(ctx, ss.peerID, msg); err != nil {
+	if err := b.SyncReceiveMessage(ctx, ss.peerID, msg); err != nil {
 		return nil, err
 	}
 
@@ -66,7 +66,7 @@ func (ss *SyncState) GenerateMessage() (sm *SyncMessage, valid bool) {
 	defer unlock()
 
 	ctx := context.Background()
-	msgBytes, ok, err := b.syncGenerateMessage(ctx, ss.peerID)
+	msgBytes, ok, err := b.SyncGenerateMessage(ctx, ss.peerID)
 	if err != nil {
 		return nil, false
 	}
@@ -83,7 +83,7 @@ func (ss *SyncState) Save() []byte {
 	defer unlock()
 
 	ctx := context.Background()
-	data, err := b.syncSave(ctx, ss.peerID)
+	data, err := b.SyncSave(ctx, ss.peerID)
 	if err != nil {
 		panic(fmt.Errorf("automerge.SyncState.Save: %w", err))
 	}

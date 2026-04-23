@@ -1,63 +1,38 @@
 package automerge
 
-import "fmt"
+import "github.com/joeybrown/automerge-go/internal/backend"
 
 // Kind represents the underlying type of a Value
-type Kind uint
+type Kind = backend.Kind
 
 var (
 	// KindVoid indicates the value was not present
-	KindVoid Kind = 0
+	KindVoid = backend.KindVoid
 	// KindBool indicates a bool
-	KindBool Kind = 1
+	KindBool = backend.KindBool
 	// KindBytes indicates a []byte
-	KindBytes Kind = 2
+	KindBytes = backend.KindBytes
 	// KindCounter indicates an *automerge.Counter
-	KindCounter Kind = 3
+	KindCounter = backend.KindCounter
 	// KindFloat64 indicates a float64
-	KindFloat64 Kind = 4
+	KindFloat64 = backend.KindFloat64
 	// KindInt64 indicates an int
-	KindInt64 Kind = 5
+	KindInt64 = backend.KindInt64
 	// KindUint64 indicates a uint
-	KindUint64 Kind = 6
+	KindUint64 = backend.KindUint64
 	// KindNull indicates an explicit null was present
-	KindNull Kind = 7
+	KindNull = backend.KindNull
 	// KindStr indicates a string
-	KindStr Kind = 8
+	KindStr = backend.KindStr
 	// KindTime indicates a time.Time
-	KindTime Kind = 9
+	KindTime = backend.KindTime
 	// KindUnknown indicates an unknown type from a future version of automerge
-	KindUnknown Kind = 10
+	KindUnknown = backend.KindUnknown
 
 	// KindMap indicates an *automerge.Map
-	KindMap Kind = 11
+	KindMap = backend.KindMap
 	// KindList indicates an *automerge.List
-	KindList Kind = 12
+	KindList = backend.KindList
 	// KindText indicates an *automerge.Text
-	KindText Kind = 13
+	KindText = backend.KindText
 )
-
-var kindDescriptions = map[Kind]string{
-	KindVoid:    "KindVoid",
-	KindBool:    "KindBool",
-	KindBytes:   "KindBytes",
-	KindCounter: "KindCounter",
-	KindFloat64: "KindFloat64",
-	KindInt64:   "KindInt64",
-	KindUint64:  "KindUint64",
-	KindNull:    "KindNull",
-	KindStr:     "KindStr",
-	KindTime:    "KindTime",
-	KindUnknown: "KindUnknown",
-	KindMap:     "KindMap",
-	KindList:    "KindList",
-	KindText:    "KindText",
-}
-
-// String returns a human-readable representation of the Kind
-func (k Kind) String() string {
-	if s, ok := kindDescriptions[k]; ok {
-		return s
-	}
-	return fmt.Sprintf("Kind(%v)", uint(k))
-}

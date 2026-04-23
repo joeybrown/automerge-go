@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/automerge/automerge-go"
+	"github.com/joeybrown/automerge-go"
 )
 
 // BenchmarkNewDoc measures the cost of creating a new document (includes WASM

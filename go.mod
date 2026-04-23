@@ -1,4 +1,4 @@
-module github.com/automerge/automerge-go
+module github.com/joeybrown/automerge-go
 
 go 1.24.0
 

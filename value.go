@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/joeybrown/automerge-go/internal/backend"
 )
 
 // Value represents a dynamically typed value read from a document.
@@ -17,40 +19,40 @@ type Value struct {
 	val  any
 }
 
-func newValueFromBackend(bv *backendValue, d *Doc) *Value {
-	v := &Value{doc: d, kind: bv.kind}
-	switch bv.kind {
+func newValueFromBackend(bv *backend.BackendValue, d *Doc) *Value {
+	v := &Value{doc: d, kind: bv.Kind}
+	switch bv.Kind {
 	case KindNull, KindVoid, KindUnknown:
 		v.val = nil
 	case KindBool:
-		v.val = bv.val
+		v.val = bv.Val
 	case KindStr:
-		v.val = bv.val
+		v.val = bv.Val
 	case KindBytes:
-		v.val = bv.val
+		v.val = bv.Val
 	case KindFloat64:
-		v.val = bv.val
+		v.val = bv.Val
 	case KindInt64:
-		v.val = bv.val
+		v.val = bv.Val
 	case KindUint64:
-		v.val = bv.val
+		v.val = bv.Val
 	case KindTime:
-		v.val = bv.val
+		v.val = bv.Val
 	case KindCounter:
-		v.val = &Counter{val: bv.val.(int64)}
+		v.val = &Counter{val: bv.Val.(int64)}
 	case KindMap:
-		v.val = &Map{doc: d, handle: bv.obj}
+		v.val = &Map{doc: d, handle: bv.Obj}
 	case KindList:
-		v.val = &List{doc: d, handle: bv.obj}
+		v.val = &List{doc: d, handle: bv.Obj}
 	case KindText:
-		v.val = &Text{doc: d, handle: bv.obj}
+		v.val = &Text{doc: d, handle: bv.Obj}
 	default:
-		panic(fmt.Errorf("tried to create Value with Kind == %v", bv.kind))
+		panic(fmt.Errorf("tried to create Value with Kind == %v", bv.Kind))
 	}
 	return v
 }
 
-func newValueInMap(bv *backendValue, m *Map, key string) *Value {
+func newValueInMap(bv *backend.BackendValue, m *Map, key string) *Value {
 	v := newValueFromBackend(bv, m.doc)
 	if c, ok := v.val.(*Counter); ok {
 		c.m = m
@@ -59,7 +61,7 @@ func newValueInMap(bv *backendValue, m *Map, key string) *Value {
 	return v
 }
 
-func newValueInList(bv *backendValue, l *List, idx int) *Value {
+func newValueInList(bv *backend.BackendValue, l *List, idx int) *Value {
 	v := newValueFromBackend(bv, l.doc)
 	if c, ok := v.val.(*Counter); ok {
 		c.l = l
