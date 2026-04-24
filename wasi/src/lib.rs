@@ -22,6 +22,8 @@ mod obj;
 mod map_ops;
 mod list_ops;
 mod text_ops;
+mod richtext_ops;
+mod cursor_ops;
 mod counter_ops;
 mod commit;
 mod changes;

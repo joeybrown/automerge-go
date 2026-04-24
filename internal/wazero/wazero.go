@@ -539,6 +539,134 @@ func (b *Backend) TextSplice(ctx context.Context, obj backend.ObjHandle, pos uin
 	return nil
 }
 
+func (b *Backend) Mark(ctx context.Context, obj backend.ObjHandle, name string, value string, start, end uint, expand uint8) error {
+	namePtr, nameSize, err := b.writeBytes(ctx, []byte(name))
+	if err != nil {
+		return err
+	}
+	defer b.free(ctx, namePtr, nameSize)
+
+	valuePtr, valueSize, err := b.writeBytes(ctx, []byte(value))
+	if err != nil {
+		return err
+	}
+	defer b.free(ctx, valuePtr, valueSize)
+
+	res, err := b.call(ctx, "am_mark",
+		uint64(obj),
+		uint64(namePtr), uint64(nameSize),
+		uint64(valuePtr), uint64(valueSize),
+		uint64(start), uint64(end),
+		uint64(expand),
+	)
+	if err != nil {
+		return err
+	}
+	if int32(res[0]) != 0 {
+		if errMsg := b.lastError(ctx); errMsg != "" {
+			return fmt.Errorf("%s", errMsg)
+		}
+		return fmt.Errorf("automerge: am_mark failed: %d", int32(res[0]))
+	}
+	return nil
+}
+
+func (b *Backend) Unmark(ctx context.Context, obj backend.ObjHandle, name string, start, end uint, expand uint8) error {
+	namePtr, nameSize, err := b.writeBytes(ctx, []byte(name))
+	if err != nil {
+		return err
+	}
+	defer b.free(ctx, namePtr, nameSize)
+
+	res, err := b.call(ctx, "am_unmark",
+		uint64(obj),
+		uint64(namePtr), uint64(nameSize),
+		uint64(start), uint64(end),
+		uint64(expand),
+	)
+	if err != nil {
+		return err
+	}
+	if int32(res[0]) != 0 {
+		if errMsg := b.lastError(ctx); errMsg != "" {
+			return fmt.Errorf("%s", errMsg)
+		}
+		return fmt.Errorf("automerge: am_unmark failed: %d", int32(res[0]))
+	}
+	return nil
+}
+
+func (b *Backend) Marks(ctx context.Context, obj backend.ObjHandle) (string, error) {
+	res, err := b.call(ctx, "am_marks_len", uint64(obj))
+	if err != nil {
+		return "", err
+	}
+	jsonLen := uint32(res[0])
+	if jsonLen == 0 {
+		return "[]", nil
+	}
+	ptr, err := b.alloc(ctx, jsonLen)
+	if err != nil {
+		return "", err
+	}
+	defer b.free(ctx, ptr, jsonLen)
+	_, err = b.call(ctx, "am_marks", uint64(obj), uint64(ptr))
+	if err != nil {
+		return "", err
+	}
+	data, err := b.readBytes(ptr, jsonLen)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (b *Backend) GetCursor(ctx context.Context, obj backend.ObjHandle, index uint) (string, error) {
+	res, err := b.call(ctx, "am_get_cursor", uint64(obj), uint64(index))
+	if err != nil {
+		return "", err
+	}
+	cursorLen := int32(res[0])
+	if cursorLen < 0 {
+		return "", fmt.Errorf("automerge: am_get_cursor failed: %d", cursorLen)
+	}
+	ptr, err := b.alloc(ctx, uint32(cursorLen))
+	if err != nil {
+		return "", err
+	}
+	defer b.free(ctx, ptr, uint32(cursorLen))
+	_, err = b.call(ctx, "am_get_cursor_str", uint64(ptr))
+	if err != nil {
+		return "", err
+	}
+	data, err := b.readBytes(ptr, uint32(cursorLen))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (b *Backend) LookupCursor(ctx context.Context, obj backend.ObjHandle, cursor string) (uint, error) {
+	cursorPtr, cursorSize, err := b.writeBytes(ctx, []byte(cursor))
+	if err != nil {
+		return 0, err
+	}
+	defer b.free(ctx, cursorPtr, cursorSize)
+
+	res, err := b.call(ctx, "am_lookup_cursor",
+		uint64(obj),
+		uint64(cursorPtr), uint64(cursorSize),
+	)
+	if err != nil {
+		return 0, err
+	}
+	index := int32(res[0])
+	if index < 0 {
+		return 0, fmt.Errorf("automerge: am_lookup_cursor failed: %d", index)
+	}
+	return uint(index), nil
+}
+
 func (b *Backend) ObjSize(ctx context.Context, obj backend.ObjHandle) (uint, error) {
 	res, err := b.call(ctx, "am_obj_size", uint64(obj))
 	if err != nil {

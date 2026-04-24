@@ -150,6 +150,15 @@ type Backend interface {
 	TextGet(ctx context.Context, obj ObjHandle) (string, error)
 	TextSplice(ctx context.Context, obj ObjHandle, pos uint, del int, text string) error
 
+	// Rich text marks
+	Mark(ctx context.Context, obj ObjHandle, name string, value string, start, end uint, expand uint8) error
+	Unmark(ctx context.Context, obj ObjHandle, name string, start, end uint, expand uint8) error
+	Marks(ctx context.Context, obj ObjHandle) (string, error)
+
+	// Cursors
+	GetCursor(ctx context.Context, obj ObjHandle, index uint) (string, error)
+	LookupCursor(ctx context.Context, obj ObjHandle, cursor string) (uint, error)
+
 	// Object introspection
 	ObjSize(ctx context.Context, obj ObjHandle) (uint, error)
 	ObjType(ctx context.Context, obj ObjHandle) (Kind, error)
