@@ -3,7 +3,7 @@ package automerge_test
 import (
 	"fmt"
 
-	"github.com/automerge/automerge-go"
+	"github.com/joeybrown/automerge-go"
 )
 
 func ExampleAs() {

@@ -3,7 +3,7 @@ package automerge_test
 import (
 	"testing"
 
-	"github.com/automerge/automerge-go"
+	"github.com/joeybrown/automerge-go"
 	"github.com/stretchr/testify/require"
 )
 

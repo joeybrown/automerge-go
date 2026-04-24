@@ -1,34 +1,24 @@
 package automerge
 
 import (
+	"context"
 	"fmt"
-	"runtime"
 	"time"
-)
 
-// #include <automerge.h>
-import "C"
+	"github.com/joeybrown/automerge-go/internal/backend"
+)
 
 // Map is an automerge type that stores a map of strings to values
 type Map struct {
-	doc *Doc
-
-	objID *objID
-	path  *Path
+	doc    *Doc
+	handle backend.ObjHandle
+	path   *Path
 }
 
 // NewMap returns a detached map.
 // Before you can read from or write to it you must write it to the document.
 func NewMap() *Map {
 	return &Map{}
-}
-
-func (m *Map) lock() (*C.AMdoc, *C.AMobjId, func()) {
-	cDoc, unlock := m.doc.lock()
-	return cDoc, m.objID.cObjID, func() {
-		runtime.KeepAlive(m)
-		unlock()
-	}
 }
 
 func (m *Map) createOnPath(key string) error {
@@ -40,15 +30,13 @@ func (m *Map) createOnPath(key string) error {
 	if err != nil {
 		return err
 	}
-	m.objID = m2.objID
+	m.doc = m2.doc
+	m.handle = m2.handle
 	m.path = nil
 	return nil
 }
 
 // Get retrieves the value from the map.
-// This method will return an error if the underlying Get
-// operation fails, or if this is the first attempt to access
-// a Path.Map() and the path is not traverseable
 func (m *Map) Get(key string) (*Value, error) {
 	if m.doc == nil {
 		return nil, fmt.Errorf("automerge.Map: tried to read detached map")
@@ -57,16 +45,15 @@ func (m *Map) Get(key string) (*Value, error) {
 		return m.path.Path(key).Get()
 	}
 
-	cKey, free := toByteSpanStr(key)
-	defer free()
-	cDoc, cObj, unlock := m.lock()
+	b, unlock := m.doc.lock()
 	defer unlock()
 
-	item, err := wrap(C.AMmapGet(cDoc, cObj, cKey, nil)).item()
+	ctx := context.Background()
+	bv, err := b.MapGet(ctx, m.handle, key)
 	if err != nil {
 		return nil, err
 	}
-	return newValueInMap(item, m, key), nil
+	return newValueInMap(bv, m, key), nil
 }
 
 // Len returns the number of keys set in the map, or 0 on error
@@ -82,9 +69,15 @@ func (m *Map) Len() int {
 		return v.Map().Len()
 	}
 
-	cDoc, cObj, unlock := m.lock()
+	b, unlock := m.doc.lock()
 	defer unlock()
-	return int(C.AMobjSize(cDoc, cObj, nil))
+
+	ctx := context.Background()
+	size, err := b.ObjSize(ctx, m.handle)
+	if err != nil {
+		return 0
+	}
+	return int(size)
 }
 
 // Delete deletes a key and its corresponding value from the map
@@ -96,18 +89,14 @@ func (m *Map) Delete(key string) error {
 		return err
 	}
 
-	cKey, free := toByteSpanStr(key)
-	defer free()
-	cDoc, cObj, unlock := m.lock()
+	b, unlock := m.doc.lock()
 	defer unlock()
 
-	return wrap(C.AMmapDelete(cDoc, cObj, cKey)).void()
+	ctx := context.Background()
+	return b.MapDelete(ctx, m.handle, key)
 }
 
 // Set sets a key in the map to a given value.
-// This method may error if the underlying operation errors,
-// the type you provide cannot be converted to an automerge type,
-// or if this is the first write to a [Path.Map] and the path is not traverseable.
 func (m *Map) Set(key string, value any) error {
 	if m.doc == nil {
 		return fmt.Errorf("automerge.Map: tried to write to detached map")
@@ -121,38 +110,42 @@ func (m *Map) Set(key string, value any) error {
 		return err
 	}
 
-	cKey, free := toByteSpanStr(key)
-	defer free()
-	cDoc, cObj, unlock := m.lock()
+	b, unlock := m.doc.lock()
 	defer unlock()
+	ctx := context.Background()
 
 	switch v := value.(type) {
 	case nil:
-		err = wrap(C.AMmapPutNull(cDoc, cObj, cKey)).void()
+		tag, payload := backend.EncodeNull()
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case bool:
-		err = wrap(C.AMmapPutBool(cDoc, cObj, cKey, C.bool(v))).void()
+		tag, payload := backend.EncodeBool(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
+
 	case string:
-		vStr, free := toByteSpanStr(v)
-		defer free()
-		err = wrap(C.AMmapPutStr(cDoc, cObj, cKey, vStr)).void()
+		tag, payload := backend.EncodeStr(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case []byte:
-		vBytes, free := toByteSpan(v)
-		defer free()
-		err = wrap(C.AMmapPutBytes(cDoc, cObj, cKey, vBytes)).void()
+		tag, payload := backend.EncodeBytes(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case int64:
-		err = wrap(C.AMmapPutInt(cDoc, cObj, cKey, C.int64_t(v))).void()
+		tag, payload := backend.EncodeInt64(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case uint64:
-		err = wrap(C.AMmapPutUint(cDoc, cObj, cKey, C.uint64_t(v))).void()
+		tag, payload := backend.EncodeUint64(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case float64:
-		err = wrap(C.AMmapPutF64(cDoc, cObj, cKey, C.double(v))).void()
+		tag, payload := backend.EncodeFloat64(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case time.Time:
-		err = wrap(C.AMmapPutTimestamp(cDoc, cObj, cKey, C.int64_t(v.UnixMilli()))).void()
+		tag, payload := backend.EncodeTimestamp(v)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 
 	case []any:
 		unlock()
@@ -160,7 +153,6 @@ func (m *Map) Set(key string, value any) error {
 		nl := NewList()
 		if err := m.Set(key, nl); err != nil {
 			return err
-
 		}
 		return nl.Append(v...)
 
@@ -171,7 +163,6 @@ func (m *Map) Set(key string, value any) error {
 		if err := m.Set(key, n); err != nil {
 			return err
 		}
-
 		for key, val := range v {
 			if err := n.Set(key, val); err != nil {
 				return err
@@ -179,51 +170,54 @@ func (m *Map) Set(key string, value any) error {
 		}
 
 	case *Map:
-		if v.objID != nil {
+		if m.doc != nil && v.doc != nil {
 			return fmt.Errorf("automerge.Map: tried to move an existing *automerge.Map")
 		}
 
-		item, err := wrap(C.AMmapPutObject(cDoc, cObj, cKey, C.AM_OBJ_TYPE_MAP)).item()
-		if err != nil {
-			return err
+		h, putErr := b.MapPut(ctx, m.handle, key, backend.TagMap, nil)
+		if putErr != nil {
+			err = putErr
+			break
 		}
-
 		v.doc = m.doc
-		v.objID = item.objID()
+		v.handle = h
 
 	case *List:
-		if v.objID != nil {
+		if v.doc != nil {
 			return fmt.Errorf("automerge.Map: tried to move an existing *automerge.List")
 		}
 
-		item, err := wrap(C.AMmapPutObject(cDoc, cObj, cKey, C.AM_OBJ_TYPE_LIST)).item()
-		if err != nil {
-			return err
+		h, putErr := b.MapPut(ctx, m.handle, key, backend.TagList, nil)
+		if putErr != nil {
+			err = putErr
+			break
 		}
 		v.doc = m.doc
-		v.objID = item.objID()
+		v.handle = h
 
 	case *Counter:
 		if v.m != nil || v.l != nil {
 			return fmt.Errorf("automerge.Map: tried to move an existing *automerge.Counter")
 		}
 
-		err = wrap(C.AMmapPutCounter(cDoc, cObj, cKey, C.int64_t(v.val))).void()
+		tag, payload := backend.EncodeCounter(v.val)
+		_, err = b.MapPut(ctx, m.handle, key, tag, payload)
 		if err == nil {
 			v.m = m
 			v.key = key
 		}
 
 	case *Text:
-		if v.objID != nil {
+		if v.doc != nil {
 			return fmt.Errorf("automerge.Map: tried to move an existing *automerge.Text")
 		}
-		item, err := wrap(C.AMmapPutObject(cDoc, cObj, cKey, C.AM_OBJ_TYPE_TEXT)).item()
-		if err != nil {
-			return err
+		h, putErr := b.MapPut(ctx, m.handle, key, backend.TagText, nil)
+		if putErr != nil {
+			err = putErr
+			break
 		}
 		v.doc = m.doc
-		v.objID = item.objID()
+		v.handle = h
 		unlock()
 		if err = v.Set(v.val); err != nil {
 			return err
@@ -237,12 +231,11 @@ func (m *Map) Set(key string, value any) error {
 }
 
 func (m *Map) inc(key string, delta int64) error {
-	cDoc, cObj, unlock := m.lock()
+	b, unlock := m.doc.lock()
 	defer unlock()
-	cKey, free := toByteSpanStr(key)
-	defer free()
 
-	return wrap(C.AMmapIncrement(cDoc, cObj, cKey, C.int64_t(delta))).void()
+	ctx := context.Background()
+	return b.MapIncrement(ctx, m.handle, key, delta)
 }
 
 // Values returns the values of the map
@@ -265,18 +258,23 @@ func (m *Map) Values() (map[string]*Value, error) {
 		}
 	}
 
-	cDoc, cObj, unlock := m.lock()
+	b, unlock := m.doc.lock()
 	defer unlock()
 
-	items, err := wrap(C.AMmapRange(cDoc, cObj, C.AMstr(nil), C.AMstr(nil), nil)).items()
+	ctx := context.Background()
+
+	keys, err := b.ObjKeys(ctx, m.handle)
 	if err != nil {
 		return nil, err
 	}
 
 	ret := map[string]*Value{}
-	for _, i := range items {
-		key := i.mapKey()
-		ret[key] = newValueInMap(i, m, key)
+	for _, key := range keys {
+		bv, err := b.MapGet(ctx, m.handle, key)
+		if err != nil {
+			return nil, err
+		}
+		ret[key] = newValueInMap(bv, m, key)
 	}
 	return ret, nil
 }
@@ -310,20 +308,19 @@ func (m *Map) GoString() string {
 		if i > 0 {
 			sofar += ", "
 		}
-		sofar += fmt.Sprintf("%#v: ", k)
+		i++
 		if v.Kind() == KindMap {
-			sofar += "&automerge.Map{...}"
+			sofar += fmt.Sprintf("%#v: &automerge.Map{...}", k)
 		} else if v.Kind() == KindList {
-			sofar += "&automerge.List{...}"
+			sofar += fmt.Sprintf("%#v: &automerge.List{...}", k)
 		} else {
-			sofar += fmt.Sprintf("%#v", v.val)
+			sofar += fmt.Sprintf("%#v: %#v", k, v.val)
 		}
 
 		if i >= 5 {
 			sofar += ", ..."
 			break
 		}
-		i++
 	}
 
 	return sofar + "}"

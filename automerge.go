@@ -1,7 +1,8 @@
 /*
 Package automerge provides the ability to interact with [automerge] documents.
-It is a featureful wrapper around [automerge-rs] that uses cgo to avoid reimplementing
-the core engine from scratch.
+It is a featureful wrapper around [automerge-rs] that uses wazero to run the
+automerge engine as an embedded WASM module, requiring no C compiler or
+platform-specific libraries.
 
 # Document Structure and Types
 
