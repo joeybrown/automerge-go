@@ -265,4 +265,3 @@ func TestText_ExpandMarkConstants(t *testing.T) {
 	require.Equal(t, automerge.ExpandMark(2), automerge.ExpandAfter)
 	require.Equal(t, automerge.ExpandMark(3), automerge.ExpandBoth)
 }
-
