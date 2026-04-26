@@ -621,6 +621,75 @@ func (b *Backend) Marks(ctx context.Context, obj backend.ObjHandle) (string, err
 	return string(data), nil
 }
 
+func (b *Backend) Spans(ctx context.Context, obj backend.ObjHandle) (string, error) {
+	res, err := b.call(ctx, "am_spans_len", uint64(obj))
+	if err != nil {
+		return "", err
+	}
+	jsonLen := uint32(res[0])
+	if jsonLen == 0 {
+		return "[]", nil
+	}
+	ptr, err := b.alloc(ctx, jsonLen)
+	if err != nil {
+		return "", err
+	}
+	defer b.free(ctx, ptr, jsonLen)
+	_, err = b.call(ctx, "am_spans", uint64(obj), uint64(ptr))
+	if err != nil {
+		return "", err
+	}
+	data, err := b.readBytes(ptr, jsonLen)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (b *Backend) SplitBlock(ctx context.Context, obj backend.ObjHandle, index uint) (backend.ObjHandle, error) {
+	res, err := b.call(ctx, "am_split_block", uint64(obj), uint64(index))
+	if err != nil {
+		return backend.InvalidObjHandle, err
+	}
+	rc := int32(res[0])
+	if rc < 0 {
+		if errMsg := b.lastError(ctx); errMsg != "" {
+			return backend.InvalidObjHandle, fmt.Errorf("%s", errMsg)
+		}
+		return backend.InvalidObjHandle, fmt.Errorf("automerge: am_split_block failed: %d", rc)
+	}
+	return backend.ObjHandle(rc), nil
+}
+
+func (b *Backend) JoinBlock(ctx context.Context, obj backend.ObjHandle, index uint) error {
+	res, err := b.call(ctx, "am_join_block", uint64(obj), uint64(index))
+	if err != nil {
+		return err
+	}
+	if int32(res[0]) != 0 {
+		if errMsg := b.lastError(ctx); errMsg != "" {
+			return fmt.Errorf("%s", errMsg)
+		}
+		return fmt.Errorf("automerge: am_join_block failed: %d", int32(res[0]))
+	}
+	return nil
+}
+
+func (b *Backend) ReplaceBlock(ctx context.Context, obj backend.ObjHandle, index uint) (backend.ObjHandle, error) {
+	res, err := b.call(ctx, "am_replace_block", uint64(obj), uint64(index))
+	if err != nil {
+		return backend.InvalidObjHandle, err
+	}
+	rc := int32(res[0])
+	if rc < 0 {
+		if errMsg := b.lastError(ctx); errMsg != "" {
+			return backend.InvalidObjHandle, fmt.Errorf("%s", errMsg)
+		}
+		return backend.InvalidObjHandle, fmt.Errorf("automerge: am_replace_block failed: %d", rc)
+	}
+	return backend.ObjHandle(rc), nil
+}
+
 func (b *Backend) GetCursor(ctx context.Context, obj backend.ObjHandle, index uint) (string, error) {
 	res, err := b.call(ctx, "am_get_cursor", uint64(obj), uint64(index))
 	if err != nil {
