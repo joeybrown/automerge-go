@@ -155,6 +155,12 @@ type Backend interface {
 	Unmark(ctx context.Context, obj ObjHandle, name string, start, end uint, expand uint8) error
 	Marks(ctx context.Context, obj ObjHandle) (string, error)
 
+	// Spans and blocks
+	Spans(ctx context.Context, obj ObjHandle) (string, error)
+	SplitBlock(ctx context.Context, obj ObjHandle, index uint) (ObjHandle, error)
+	JoinBlock(ctx context.Context, obj ObjHandle, index uint) error
+	ReplaceBlock(ctx context.Context, obj ObjHandle, index uint) (ObjHandle, error)
+
 	// Cursors
 	GetCursor(ctx context.Context, obj ObjHandle, index uint) (string, error)
 	LookupCursor(ctx context.Context, obj ObjHandle, cursor string) (uint, error)
@@ -198,14 +204,14 @@ type Backend interface {
 
 // --- Value encoding helpers ---
 
-func EncodeNull() (byte, []byte)  { return TagNull, nil }
+func EncodeNull() (byte, []byte) { return TagNull, nil }
 func EncodeBool(v bool) (byte, []byte) {
 	if v {
 		return TagBool, []byte{1}
 	}
 	return TagBool, []byte{0}
 }
-func EncodeStr(v string) (byte, []byte)  { return TagString, []byte(v) }
+func EncodeStr(v string) (byte, []byte)   { return TagString, []byte(v) }
 func EncodeBytes(v []byte) (byte, []byte) { return TagBytes, v }
 func EncodeInt64(v int64) (byte, []byte) {
 	buf := make([]byte, 8)

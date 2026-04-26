@@ -350,3 +350,182 @@ func (t *Text) LookupCursor(c *Cursor) (int, error) {
 	}
 	return int(idx), nil
 }
+
+// SpanType identifies whether a Span is a text run or a block marker.
+type SpanType string
+
+const (
+	// SpanText indicates a span of text with optional formatting marks.
+	SpanText SpanType = "text"
+	// SpanBlock indicates a block marker (paragraph, heading, list item, etc.).
+	SpanBlock SpanType = "block"
+)
+
+// Span represents one element in the rich-text structure of a Text object.
+// A span is either a run of text with formatting marks, or a block marker.
+type Span struct {
+	// Type is "text" or "block".
+	Type SpanType
+
+	// Text is the text content (only for SpanText spans).
+	Text string
+
+	// Marks contains the active formatting marks as name→value pairs
+	// (only for SpanText spans).
+	Marks map[string]string
+
+	// Block contains the block marker properties as a nested map
+	// (only for SpanBlock spans). Typically has keys like "type",
+	// "parents", "attrs".
+	Block map[string]any
+}
+
+// Spans returns the rich-text structure of the Text object as a sequence
+// of text runs (with marks) and block markers. This is the primary way to
+// read rich text content created by prosemirror-automerge or similar editors.
+func (t *Text) Spans() ([]Span, error) {
+	if t.doc == nil {
+		return nil, fmt.Errorf("automerge.Text: tried to read spans on detached text")
+	}
+	if t.path != nil {
+		v, err := t.path.Get()
+		if err != nil {
+			return nil, err
+		}
+		if v.Kind() != KindText {
+			return nil, fmt.Errorf("automerge.Text: tried to read spans on non-text value")
+		}
+		return v.Text().Spans()
+	}
+
+	b, unlock := t.doc.lock()
+	defer unlock()
+
+	ctx := context.Background()
+	jsonStr, err := b.Spans(ctx, t.handle)
+	if err != nil {
+		return nil, fmt.Errorf("automerge.Text: failed to get spans: %w", err)
+	}
+
+	if jsonStr == "[]" {
+		return []Span{}, nil
+	}
+
+	var rawSpans []json.RawMessage
+	if err := json.Unmarshal([]byte(jsonStr), &rawSpans); err != nil {
+		return nil, fmt.Errorf("automerge.Text: failed to parse spans JSON: %w", err)
+	}
+
+	spans := make([]Span, 0, len(rawSpans))
+	for _, raw := range rawSpans {
+		var header struct {
+			Type  string            `json:"type"`
+			Text  string            `json:"text"`
+			Marks map[string]string `json:"marks"`
+			Value map[string]any    `json:"value"`
+		}
+		if err := json.Unmarshal(raw, &header); err != nil {
+			return nil, fmt.Errorf("automerge.Text: failed to parse span: %w", err)
+		}
+		switch header.Type {
+		case "text":
+			s := Span{Type: SpanText, Text: header.Text, Marks: header.Marks}
+			if s.Marks == nil {
+				s.Marks = map[string]string{}
+			}
+			spans = append(spans, s)
+		case "block":
+			s := Span{Type: SpanBlock, Block: header.Value}
+			if s.Block == nil {
+				s.Block = map[string]any{}
+			}
+			spans = append(spans, s)
+		default:
+			return nil, fmt.Errorf("automerge.Text: unknown span type %q", header.Type)
+		}
+	}
+	return spans, nil
+}
+
+// SplitBlock inserts a block marker at the given index in the text.
+// A block marker represents block-level structure (paragraphs, headings, etc.)
+// and occupies one character position.
+//
+// Returns a Map that you can use to set block properties:
+//
+//	block, err := text.SplitBlock(0)
+//	block.Set("type", "paragraph")
+//	block.Set("attrs", automerge.NewMap())
+func (t *Text) SplitBlock(index int) (*Map, error) {
+	if t.doc == nil {
+		return nil, fmt.Errorf("automerge.Text: tried to split block on detached text")
+	}
+	if t.path != nil {
+		t2, err := t.path.ensureText()
+		if err != nil {
+			return nil, err
+		}
+		t.doc = t2.doc
+		t.handle = t2.handle
+		t.path = nil
+	}
+
+	b, unlock := t.doc.lock()
+	defer unlock()
+
+	ctx := context.Background()
+	handle, err := b.SplitBlock(ctx, t.handle, uint(index))
+	if err != nil {
+		return nil, fmt.Errorf("automerge.Text: failed to split block: %w", err)
+	}
+	return &Map{doc: t.doc, handle: handle}, nil
+}
+
+// JoinBlock deletes the block marker at the given index in the text.
+func (t *Text) JoinBlock(index int) error {
+	if t.doc == nil {
+		return fmt.Errorf("automerge.Text: tried to join block on detached text")
+	}
+	if t.path != nil {
+		t2, err := t.path.ensureText()
+		if err != nil {
+			return err
+		}
+		t.doc = t2.doc
+		t.handle = t2.handle
+		t.path = nil
+	}
+
+	b, unlock := t.doc.lock()
+	defer unlock()
+
+	ctx := context.Background()
+	return b.JoinBlock(ctx, t.handle, uint(index))
+}
+
+// ReplaceBlock replaces the block marker at the given index with a new one.
+// Returns a Map for the new block marker.
+func (t *Text) ReplaceBlock(index int) (*Map, error) {
+	if t.doc == nil {
+		return nil, fmt.Errorf("automerge.Text: tried to replace block on detached text")
+	}
+	if t.path != nil {
+		t2, err := t.path.ensureText()
+		if err != nil {
+			return nil, err
+		}
+		t.doc = t2.doc
+		t.handle = t2.handle
+		t.path = nil
+	}
+
+	b, unlock := t.doc.lock()
+	defer unlock()
+
+	ctx := context.Background()
+	handle, err := b.ReplaceBlock(ctx, t.handle, uint(index))
+	if err != nil {
+		return nil, fmt.Errorf("automerge.Text: failed to replace block: %w", err)
+	}
+	return &Map{doc: t.doc, handle: handle}, nil
+}

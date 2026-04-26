@@ -265,3 +265,138 @@ func TestText_ExpandMarkConstants(t *testing.T) {
 	require.Equal(t, automerge.ExpandMark(2), automerge.ExpandAfter)
 	require.Equal(t, automerge.ExpandMark(3), automerge.ExpandBoth)
 }
+
+func TestText_SpansPlainText(t *testing.T) {
+	doc := automerge.New()
+
+	txt := automerge.NewText("Hello, World!")
+	require.NoError(t, doc.RootMap().Set("content", txt))
+
+	spans, err := txt.Spans()
+	require.NoError(t, err)
+	require.Len(t, spans, 1)
+	require.Equal(t, automerge.SpanText, spans[0].Type)
+	require.Equal(t, "Hello, World!", spans[0].Text)
+	require.Empty(t, spans[0].Marks)
+}
+
+func TestText_SpansWithMarks(t *testing.T) {
+	doc := automerge.New()
+
+	txt := automerge.NewText("Hello, World!")
+	require.NoError(t, doc.RootMap().Set("content", txt))
+
+	require.NoError(t, txt.Mark("bold", "true", 0, 5, automerge.ExpandNone))
+
+	spans, err := txt.Spans()
+	require.NoError(t, err)
+	// "Hello" (bold) + ", World!" (no marks) = 2 spans
+	require.Len(t, spans, 2)
+
+	require.Equal(t, automerge.SpanText, spans[0].Type)
+	require.Equal(t, "Hello", spans[0].Text)
+	require.Equal(t, "true", spans[0].Marks["bold"])
+
+	require.Equal(t, automerge.SpanText, spans[1].Type)
+	require.Equal(t, ", World!", spans[1].Text)
+	require.Empty(t, spans[1].Marks)
+}
+
+func TestText_SpansEmpty(t *testing.T) {
+	doc := automerge.New()
+
+	txt := automerge.NewText("")
+	require.NoError(t, doc.RootMap().Set("content", txt))
+
+	spans, err := txt.Spans()
+	require.NoError(t, err)
+	require.Len(t, spans, 0)
+}
+
+func TestText_SplitBlockAndSpans(t *testing.T) {
+	doc := automerge.New()
+
+	txt := automerge.NewText("")
+	require.NoError(t, doc.RootMap().Set("content", txt))
+
+	// Insert a block marker at position 0
+	block, err := txt.SplitBlock(0)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+
+	// Set block properties
+	require.NoError(t, block.Set("type", "paragraph"))
+
+	// Insert text after the block marker (position 1, since block occupies pos 0)
+	require.NoError(t, txt.Splice(1, 0, "hello world"))
+
+	spans, err := txt.Spans()
+	require.NoError(t, err)
+	require.Len(t, spans, 2)
+
+	// First span should be the block marker
+	require.Equal(t, automerge.SpanBlock, spans[0].Type)
+	require.Equal(t, "paragraph", spans[0].Block["type"])
+
+	// Second span should be the text
+	require.Equal(t, automerge.SpanText, spans[1].Type)
+	require.Equal(t, "hello world", spans[1].Text)
+}
+
+func TestText_JoinBlock(t *testing.T) {
+	doc := automerge.New()
+
+	txt := automerge.NewText("")
+	require.NoError(t, doc.RootMap().Set("content", txt))
+
+	// Insert a block, then remove it
+	_, err := txt.SplitBlock(0)
+	require.NoError(t, err)
+
+	require.NoError(t, txt.Splice(1, 0, "hello"))
+
+	// Remove the block marker
+	require.NoError(t, txt.JoinBlock(0))
+
+	spans, err := txt.Spans()
+	require.NoError(t, err)
+	// Should just be text, no block
+	require.Len(t, spans, 1)
+	require.Equal(t, automerge.SpanText, spans[0].Type)
+	require.Equal(t, "hello", spans[0].Text)
+}
+
+func TestText_ReplaceBlock(t *testing.T) {
+	doc := automerge.New()
+
+	txt := automerge.NewText("")
+	require.NoError(t, doc.RootMap().Set("content", txt))
+
+	_, err := txt.SplitBlock(0)
+	require.NoError(t, err)
+
+	require.NoError(t, txt.Splice(1, 0, "heading text"))
+
+	// Replace the block with a different type
+	newBlock, err := txt.ReplaceBlock(0)
+	require.NoError(t, err)
+	require.NoError(t, newBlock.Set("type", "heading"))
+
+	spans, err := txt.Spans()
+	require.NoError(t, err)
+	require.Len(t, spans, 2)
+	require.Equal(t, automerge.SpanBlock, spans[0].Type)
+	require.Equal(t, "heading", spans[0].Block["type"])
+}
+
+func TestText_SpansDetachedError(t *testing.T) {
+	txt := automerge.NewText("hello")
+	_, err := txt.Spans()
+	require.Error(t, err)
+}
+
+func TestText_SplitBlockDetachedError(t *testing.T) {
+	txt := automerge.NewText("hello")
+	_, err := txt.SplitBlock(0)
+	require.Error(t, err)
+}
