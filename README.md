@@ -57,9 +57,7 @@ The pre-built `automerge.wasm` is embedded in the package. To rebuild it
 from the Rust source:
 
 ```sh
-cd wasi/
-cargo build --target wasm32-wasip1 --release
-cp target/wasm32-wasip1/release/automerge_wasi.wasm ../automerge.wasm
+make generate
 ```
 
 Requires Rust with the `wasm32-wasip1` target:
