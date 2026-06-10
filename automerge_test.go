@@ -640,6 +640,73 @@ func TestDoc_Changes(t *testing.T) {
 	require.Contains(t, err.Error(), "unable to parse")
 }
 
+func TestSaveLoadChanges_SingleChangeRoundTrip(t *testing.T) {
+	doc := automerge.New()
+	require.NoError(t, doc.Path("test").Set(&Sandwich{"rye", []string{"pastrami", "mustard"}}))
+	_, err := doc.Commit("boop")
+	require.NoError(t, err)
+
+	original, err := doc.Changes()
+	require.NoError(t, err)
+	require.Len(t, original, 1)
+
+	bytes := automerge.SaveChanges(original)
+
+	loaded, err := automerge.LoadChanges(bytes)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	require.Equal(t, original[0].Hash(), loaded[0].Hash())
+
+	doc2 := automerge.New()
+	require.NoError(t, doc2.Apply(loaded...))
+
+	want, err := automerge.As[map[string]*Sandwich](doc.Root())
+	require.NoError(t, err)
+	got, err := automerge.As[map[string]*Sandwich](doc2.Root())
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestSaveLoadChanges_ConcatenatedMultiCallRoundTrip(t *testing.T) {
+	doc := automerge.New()
+
+	heads0 := doc.Heads()
+	require.NoError(t, doc.Path("a").Set(&Sandwich{"rye", []string{"pastrami"}}))
+	_, err := doc.Commit("first")
+	require.NoError(t, err)
+	first, err := doc.Changes(heads0...)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+
+	heads1 := doc.Heads()
+	require.NoError(t, doc.Path("b").Set(&Sandwich{"dutch crunch", []string{"brie", "cranberry"}}))
+	_, err = doc.Commit("second")
+	require.NoError(t, err)
+	second, err := doc.Changes(heads1...)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+
+	// Concatenated output from multiple SaveChanges calls — the BFF replays
+	// publication history one publication at a time, so the input to
+	// LoadChanges is built up like this rather than from a single SaveChanges.
+	bytes := append(automerge.SaveChanges(first), automerge.SaveChanges(second)...)
+
+	loaded, err := automerge.LoadChanges(bytes)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+	require.Equal(t, first[0].Hash(), loaded[0].Hash())
+	require.Equal(t, second[0].Hash(), loaded[1].Hash())
+
+	doc2 := automerge.New()
+	require.NoError(t, doc2.Apply(loaded...))
+
+	want, err := automerge.As[map[string]*Sandwich](doc.Root())
+	require.NoError(t, err)
+	got, err := automerge.As[map[string]*Sandwich](doc2.Root())
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
 func TestIncremental(t *testing.T) {
 	doc := automerge.New()
 

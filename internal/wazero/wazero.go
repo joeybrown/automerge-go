@@ -117,13 +117,23 @@ func ParseRawChanges(ctx context.Context, raw []byte) ([][]byte, []*backend.Chan
 	}
 	defer nb.Close(ctx)
 
+	// am_load_incremental requires an existing doc; newBackendInstance only
+	// instantiates the WASM module, so create an empty doc first.
+	createRes, err := nb.call(ctx, "am_create")
+	if err != nil {
+		return nil, nil, err
+	}
+	if int32(createRes[0]) != 0 {
+		return nil, nil, fmt.Errorf("unable to parse changes")
+	}
+
 	ptr, size, err := nb.writeBytes(ctx, raw)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer nb.free(ctx, ptr, size)
 
-	res, err := nb.call(ctx, "am_load", uint64(ptr), uint64(size))
+	res, err := nb.call(ctx, "am_load_incremental", uint64(ptr), uint64(size))
 	if err != nil {
 		return nil, nil, err
 	}

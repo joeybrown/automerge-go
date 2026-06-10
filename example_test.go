@@ -2,9 +2,35 @@ package automerge_test
 
 import (
 	"fmt"
+	"testing"
 
 	"github.com/joeybrown/automerge-go"
 )
+
+func TestEmptyDocShouldHaveHead(t *testing.T) {
+	doc := automerge.New()
+	head := doc.Heads()
+	if len(head) != 0 {
+		t.Fatal("expected new doc to have one head")
+	}
+	doc.Path("rich", "text").Set(automerge.NewText(""))
+	head = doc.Heads()
+	if len(head) != 1 {
+		t.Fatal("expected doc to have one head after change")
+	}
+	text := doc.Path("rich", "text").Text()
+	if text == nil {
+		t.Fatal("expected text object to be created")
+	}
+
+	strValue, err := text.Get()
+	if err != nil {
+		t.Fatal("expected to get text value without error")
+	}
+	if strValue != "" {
+		t.Fatal("expected text to be empty")
+	}
+}
 
 func ExampleAs() {
 	doc := automerge.New()
