@@ -707,6 +707,95 @@ func TestSaveLoadChanges_ConcatenatedMultiCallRoundTrip(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+// TestSaveLoadChanges_SeparateLoadCallsPubSub reproduces the failure mode
+// where the consumer pulls changes from a pub/sub-style history stream and
+// calls LoadChanges once per published message. Each message after the first
+// has a dependency on a change that was published in an earlier message.
+// Previously the producer-side change was silently dropped because the
+// parsing backend treated it as a "pending" change.
+func TestSaveLoadChanges_SeparateLoadCallsPubSub(t *testing.T) {
+	doc := automerge.New()
+
+	heads0 := doc.Heads()
+	require.NoError(t, doc.RootMap().Set("a", 1))
+	_, err := doc.Commit("c1")
+	require.NoError(t, err)
+	chs1, err := doc.Changes(heads0...)
+	require.NoError(t, err)
+	require.Len(t, chs1, 1)
+	pub1 := automerge.SaveChanges(chs1)
+
+	heads1 := doc.Heads()
+	require.NoError(t, doc.RootMap().Set("a", 2))
+	_, err = doc.Commit("c2")
+	require.NoError(t, err)
+	chs2, err := doc.Changes(heads1...)
+	require.NoError(t, err)
+	require.Len(t, chs2, 1)
+	pub2 := automerge.SaveChanges(chs2)
+
+	// Each publication round-tripped independently.
+	loaded1, err := automerge.LoadChanges(pub1)
+	require.NoError(t, err)
+	require.Len(t, loaded1, 1)
+	require.Equal(t, chs1[0].Hash(), loaded1[0].Hash())
+
+	loaded2, err := automerge.LoadChanges(pub2)
+	require.NoError(t, err)
+	require.Len(t, loaded2, 1, "second publication must round-trip even though its parent is not in pub2")
+	require.Equal(t, chs2[0].Hash(), loaded2[0].Hash())
+
+	// Sanity check: concatenated form also round-trips.
+	loadedBoth, err := automerge.LoadChanges(append(append([]byte{}, pub1...), pub2...))
+	require.NoError(t, err)
+	require.Len(t, loadedBoth, 2)
+
+	// Apply both in order to a fresh doc — final state must match producer.
+	doc2 := automerge.New()
+	require.NoError(t, doc2.Apply(loaded1...))
+	require.NoError(t, doc2.Apply(loaded2...))
+
+	v, err := automerge.As[int64](doc2.RootMap().Get("a"))
+	require.NoError(t, err)
+	require.Equal(t, int64(2), v)
+}
+
+func TestSaveLoadChanges_EmptyInput(t *testing.T) {
+	loaded, err := automerge.LoadChanges(nil)
+	require.NoError(t, err)
+	require.Empty(t, loaded)
+
+	loaded, err = automerge.LoadChanges([]byte{})
+	require.NoError(t, err)
+	require.Empty(t, loaded)
+}
+
+func TestSaveLoadChanges_GarbageInput(t *testing.T) {
+	// Single junk byte: not enough bytes for a chunk header.
+	loaded, err := automerge.LoadChanges([]byte{0xf1})
+	require.Error(t, err)
+	require.Empty(t, loaded)
+	require.Contains(t, err.Error(), "unable to parse")
+
+	// Bytes that don't begin with the chunk magic.
+	loaded, err = automerge.LoadChanges([]byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09})
+	require.Error(t, err)
+	require.Empty(t, loaded)
+	require.Contains(t, err.Error(), "unable to parse")
+
+	// Valid magic but a chunk_type that LoadChanges is not for (document).
+	loaded, err = automerge.LoadChanges([]byte{0x85, 0x6f, 0x4a, 0x83, 0, 0, 0, 0, 0, 0})
+	require.Error(t, err)
+	require.Empty(t, loaded)
+	require.Contains(t, err.Error(), "unable to parse")
+
+	// Valid magic + change chunk type but length runs past end of buffer.
+	loaded, err = automerge.LoadChanges([]byte{0x85, 0x6f, 0x4a, 0x83, 0, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0x7f})
+	require.Error(t, err)
+	require.Empty(t, loaded)
+	require.Contains(t, err.Error(), "unable to parse")
+}
+
 func TestIncremental(t *testing.T) {
 	doc := automerge.New()
 

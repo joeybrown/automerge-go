@@ -63,7 +63,16 @@ func (c *Change) Save() []byte {
 	return out
 }
 
-// LoadChanges loads changes from bytes (see also [SaveChanges] and [Change.Save])
+// LoadChanges loads changes from bytes (see also [SaveChanges] and [Change.Save]).
+//
+// The input does not need to be self-contained or topologically ordered:
+// callers may stream changes one [SaveChanges] message at a time and pass each
+// message here independently. Every change present in the bytes is returned —
+// even a change whose parent is not in the input — and [Doc.Apply] will queue
+// any change whose dependencies are not yet present.
+//
+// LoadChanges(nil) and LoadChanges([]byte{}) return (nil, nil). Truncated or
+// otherwise malformed input returns an error.
 func LoadChanges(raw []byte) ([]*Change, error) {
 	ctx := context.Background()
 	rawChanges, infos, err := wazerobackend.ParseRawChanges(ctx, raw)
