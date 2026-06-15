@@ -108,43 +108,106 @@ func LoadBackend(ctx context.Context, raw []byte) (backend.Backend, error) {
 	return b, nil
 }
 
-// ParseRawChanges creates a temporary backend to parse concatenated raw change bytes,
-// returning the individual raw changes and their metadata.
+// ParseRawChanges splits concatenated raw change bytes into individual
+// changes and returns each change's raw bytes and parsed metadata.
+//
+// Empty input returns (nil, nil, nil). Any other input is parsed by walking
+// the automerge chunk framing in Go, so it returns every change present in
+// the input — including changes whose parents are not in the input — rather
+// than only the subset that happens to apply against an empty backend.
 func ParseRawChanges(ctx context.Context, raw []byte) ([][]byte, []*backend.ChangeInfo, error) {
+	chunks, err := splitChangeChunks(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(chunks) == 0 {
+		return nil, nil, nil
+	}
+
 	nb, err := newBackendInstance(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer nb.Close(ctx)
 
-	ptr, size, err := nb.writeBytes(ctx, raw)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer nb.free(ctx, ptr, size)
-
-	res, err := nb.call(ctx, "am_load", uint64(ptr), uint64(size))
-	if err != nil {
-		return nil, nil, err
-	}
-	if int32(res[0]) != 0 {
-		return nil, nil, fmt.Errorf("unable to parse changes")
-	}
-
-	rawChanges, err := nb.GetChanges(ctx, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	infos := make([]*backend.ChangeInfo, len(rawChanges))
-	for i, rc := range rawChanges {
+	infos := make([]*backend.ChangeInfo, len(chunks))
+	for i, rc := range chunks {
 		info, err := nb.GetChangeInfo(ctx, rc)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("unable to parse changes: %w", err)
 		}
 		infos[i] = info
 	}
-	return rawChanges, infos, nil
+	return chunks, infos, nil
+}
+
+// changeChunkMagic is the 4-byte prefix that begins every automerge chunk
+// (document, change, compressed change, or bundle). See the automerge binary
+// format: <https://automerge.org/automerge-binary-format-spec>.
+var changeChunkMagic = [4]byte{0x85, 0x6f, 0x4a, 0x83}
+
+// splitChangeChunks slices a concatenation of automerge change chunks into
+// individual chunks without going through WASM. Each chunk is
+//
+//	[4 magic][4 checksum][1 chunk_type][uLEB128 length][length bytes payload]
+//
+// Only change chunks (type 1) and compressed change chunks (type 2) are
+// accepted; document and bundle chunks are rejected since LoadChanges is for
+// individual changes, not whole documents.
+func splitChangeChunks(raw []byte) ([][]byte, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var chunks [][]byte
+	off := 0
+	for off < len(raw) {
+		start := off
+		if off+9 > len(raw) {
+			return nil, fmt.Errorf("unable to parse changes: truncated chunk header at offset %d", start)
+		}
+		if raw[off] != changeChunkMagic[0] || raw[off+1] != changeChunkMagic[1] ||
+			raw[off+2] != changeChunkMagic[2] || raw[off+3] != changeChunkMagic[3] {
+			return nil, fmt.Errorf("unable to parse changes: bad magic bytes at offset %d", start)
+		}
+		off += 8 // magic + checksum
+		chunkType := raw[off]
+		off++
+		if chunkType != 1 && chunkType != 2 {
+			return nil, fmt.Errorf("unable to parse changes: unsupported chunk type %d at offset %d", chunkType, start)
+		}
+		length, n, err := readULEB128(raw[off:])
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse changes: %s at offset %d", err, start)
+		}
+		off += n
+		end := uint64(off) + length
+		if end > uint64(len(raw)) {
+			return nil, fmt.Errorf("unable to parse changes: chunk at offset %d declares length %d but only %d bytes remain", start, length, len(raw)-off)
+		}
+		off = int(end)
+		chunk := make([]byte, off-start)
+		copy(chunk, raw[start:off])
+		chunks = append(chunks, chunk)
+	}
+	return chunks, nil
+}
+
+// readULEB128 decodes an unsigned LEB128 integer from b and returns the value
+// and the number of bytes consumed.
+func readULEB128(b []byte) (uint64, int, error) {
+	var result uint64
+	var shift uint
+	for i, x := range b {
+		if i >= 10 {
+			return 0, 0, fmt.Errorf("uleb128 overflow")
+		}
+		result |= uint64(x&0x7f) << shift
+		if x&0x80 == 0 {
+			return result, i + 1, nil
+		}
+		shift += 7
+	}
+	return 0, 0, fmt.Errorf("truncated uleb128")
 }
 
 // --- low-level WASM helpers ---
