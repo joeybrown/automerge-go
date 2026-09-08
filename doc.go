@@ -21,8 +21,9 @@ import (
 // explicitly create a [Change], though if you forget to do this most methods
 // on a document will create an anonymous change on your behalf.
 type Doc struct {
-	b backend.Backend
-	m sync.Mutex
+	b      backend.Backend
+	m      sync.Mutex
+	closed bool
 }
 
 func (d *Doc) lock() (backend.Backend, func()) {
@@ -54,6 +55,24 @@ func Load(raw []byte) (*Doc, error) {
 		return nil, err
 	}
 	return &Doc{b: b}, nil
+}
+
+// Close releases the WASM instance backing the document. Every [New], [Load]
+// and [Doc.Fork] instantiates a module that the wazero runtime holds onto until
+// it is closed, so a long-running process that creates documents per request
+// must Close them or it will retain roughly a megabyte per document forever.
+//
+// A closed document must not be used again; further calls will error. Close is
+// idempotent, so `defer doc.Close()` is safe alongside an earlier explicit
+// Close.
+func (d *Doc) Close() error {
+	b, unlock := d.lock()
+	defer unlock()
+	if d.closed {
+		return nil
+	}
+	d.closed = true
+	return b.Close(context.Background())
 }
 
 // Save exports a document to its serialized form
